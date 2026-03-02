@@ -84,11 +84,14 @@ describe("checkFilePath", () => {
     expect(result.reason).toContain("**/.env")
   })
 
-  test("default protected paths catch .env", () => {
-    const config = makeConfig({ protected: ["**/.env", "**/.env.*"] })
+  test("default .env paths are read-only (reads allowed, writes blocked)", () => {
+    const config = makeConfig({ read_only: ["**/.env", "**/.env.*"] })
 
+    expect(checkFilePath("/project/.env", "read", config).allowed).toBe(true)
+    expect(checkFilePath("/project/.env.local", "read", config).allowed).toBe(true)
     expect(checkFilePath("/project/.env", "write", config).allowed).toBe(false)
     expect(checkFilePath("/project/.env.local", "write", config).allowed).toBe(false)
+    expect(checkFilePath("/project/.env", "delete", config).allowed).toBe(false)
   })
 
   test("default protected paths catch credentials", () => {

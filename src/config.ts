@@ -20,8 +20,6 @@ export interface HallPassConfig {
 
 /** Default protected path patterns — always active even without config. */
 export const DEFAULT_PROTECTED_PATHS = [
-  "**/.env",
-  "**/.env.*",
   "**/credentials*",
   "**/secret*",
   "~/.ssh/**",
@@ -31,10 +29,16 @@ export const DEFAULT_PROTECTED_PATHS = [
   "**/*id_rsa*",
 ]
 
+/** Default read-only path patterns — reads allowed, writes/deletes blocked. */
+export const DEFAULT_READ_ONLY_PATHS = [
+  "**/.env",
+  "**/.env.*",
+]
+
 const DEFAULT_CONFIG: HallPassConfig = {
   commands: { safe: [], db_clients: [] },
   git: { protected_branches: [] },
-  paths: { protected: DEFAULT_PROTECTED_PATHS, read_only: [], no_delete: [] },
+  paths: { protected: DEFAULT_PROTECTED_PATHS, read_only: DEFAULT_READ_ONLY_PATHS, no_delete: [] },
   audit: { enabled: false, path: resolve(homedir(), ".config", "hall-pass", "audit.jsonl") },
   debug: { enabled: false },
 }

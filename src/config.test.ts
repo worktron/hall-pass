@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { loadConfig, expandTilde, generateDefaultConfig, DEFAULT_PROTECTED_PATHS, initConfig } from "./config.ts"
+import { loadConfig, expandTilde, generateDefaultConfig, DEFAULT_PROTECTED_PATHS, DEFAULT_READ_ONLY_PATHS, initConfig } from "./config.ts"
 import { homedir } from "os"
 import { resolve } from "path"
 import { mkdtemp, rm } from "fs/promises"
@@ -66,7 +66,7 @@ enabled = true
       expect(config.paths.protected).toContain(expandTilde(defaultPath))
     }
 
-    expect(config.paths.read_only).toEqual(["**/config/prod/**"])
+    expect(config.paths.read_only).toEqual([...DEFAULT_READ_ONLY_PATHS, "**/config/prod/**"])
     expect(config.paths.no_delete).toEqual(["**/migrations/**"])
 
     expect(config.audit.enabled).toBe(true)
@@ -85,8 +85,8 @@ protected = ["**/my-secret"]
 
     // Should have both default and user paths
     expect(config.paths.protected).toContain("**/my-secret")
-    // Default .env pattern should still be present (with ~ expanded)
-    expect(config.paths.protected.some(p => p.includes(".env"))).toBe(true)
+    // Default .env pattern should be in read_only (with ~ expanded)
+    expect(config.paths.read_only.some(p => p.includes(".env"))).toBe(true)
   })
 
   test("expands ~ in paths", async () => {
