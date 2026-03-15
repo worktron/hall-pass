@@ -7,8 +7,10 @@
  */
 
 import type { CommandInfo } from "./parser.ts"
+import { extractCommandInfos } from "./parser.ts"
 import type { EvalResult, EvalContext } from "./evaluate.ts"
 import { isGitCommandSafe } from "./git.ts"
+import { DANGEROUS_ENV_VARS } from "./safelist.ts"
 
 export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 
@@ -51,7 +53,77 @@ export const INSPECTORS: Record<string, Inspector> = {
     return prompt("source: executes arbitrary scripts")
   },
 
+  sh: (cmdInfo, ctx) => shellInspector(cmdInfo, ctx),
+  bash: (cmdInfo, ctx) => shellInspector(cmdInfo, ctx),
+  zsh: (cmdInfo, ctx) => shellInspector(cmdInfo, ctx),
+
+  env: (cmdInfo, ctx) => {
+    const args = cmdInfo.args
+    // bare `env` prints environment — safe
+    if (args.length === 1) return allow("env: prints environment")
+
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]
+      // Skip flags
+      if (arg === "-i" || arg === "--ignore-environment" || arg === "-0" || arg === "--null") continue
+      if (arg === "-u" || arg === "--unset") { i++; continue }
+      if (arg.startsWith("-u") || arg.startsWith("--unset=")) continue
+      if (arg === "--") { i++; /* next is command */ break }
+
+      // VAR=val assignment — check for dangerous vars
+      if (arg.includes("=")) {
+        const varName = arg.split("=")[0]
+        if (DANGEROUS_ENV_VARS.has(varName)) {
+          return prompt(`env: dangerous var ${varName}`)
+        }
+        continue
+      }
+
+      // First non-flag, non-assignment arg is the command
+      const subArgs = args.slice(i)
+      const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
+      return ctx.evaluate(subCmd)
+    }
+
+    return allow("env: no command")
+  },
+
+  command: (cmdInfo, ctx) => {
+    const args = cmdInfo.args
+    if (args.length === 1) return allow("command: no args")
+
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]
+      // command -v / -V just prints command info (like which)
+      if (arg === "-v" || arg === "-V") return allow("command: lookup")
+      if (arg === "-p") continue // use default PATH
+      if (arg === "--") { i++; break }
+
+      // First non-flag arg is the command to run
+      const subArgs = args.slice(i)
+      const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
+      return ctx.evaluate(subCmd)
+    }
+
+    return allow("command: no command found")
+  },
+
   // -- Commands with dangerous flag variants --
+
+  perl: (cmdInfo) => {
+    for (const arg of cmdInfo.args) {
+      if (arg === "-e" || arg === "-E") return prompt("perl: inline code")
+    }
+    return allow("perl: script runner")
+  },
+
+  ruby: (cmdInfo) => {
+    for (const arg of cmdInfo.args) {
+      if (arg === "-e") return prompt("ruby: inline code")
+    }
+    return allow("ruby: script runner")
+  },
+
 
   find: (cmdInfo, ctx) => {
     const args = cmdInfo.args
@@ -191,4 +263,62 @@ export const INSPECTORS: Record<string, Inspector> = {
     }
     return allow("python3: script runner")
   },
+}
+
+/**
+ * Inspector for sh/bash/zsh -c 'script'.
+ * Parses the inline script with shfmt and evaluates each sub-command
+ * through the full pipeline. Without -c, prompts (arbitrary script file).
+ */
+function shellInspector(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
+  const args = cmdInfo.args
+  const shell = cmdInfo.name
+
+  // Find -c flag
+  let script: string | undefined
+  for (let i = 1; i < args.length; i++) {
+    if (args[i] === "-c") {
+      script = args[i + 1]
+      break
+    }
+  }
+
+  // No -c flag — running a script file, always prompt
+  if (script === undefined) {
+    return prompt(`${shell}: script execution`)
+  }
+
+  if (!script) {
+    return prompt(`${shell}: -c with empty script`)
+  }
+
+  // Parse the inline script with shfmt
+  const proc = Bun.spawnSync(["shfmt", "--tojson"], {
+    stdin: Buffer.from(script),
+  })
+
+  if (proc.exitCode !== 0) {
+    return prompt(`${shell}: -c script parse failed`)
+  }
+
+  let ast: unknown
+  try {
+    ast = JSON.parse(proc.stdout.toString())
+  } catch {
+    return prompt(`${shell}: -c script JSON parse failed`)
+  }
+
+  // Extract and evaluate all commands in the inline script
+  const subCommands = extractCommandInfos(ast)
+
+  if (subCommands.length === 0) {
+    return allow(`${shell} -c: no commands`)
+  }
+
+  for (const subCmd of subCommands) {
+    const result = ctx.evaluate(subCmd)
+    if (result.decision !== "allow") return result
+  }
+
+  return allow(`${shell} -c: all commands safe`)
 }

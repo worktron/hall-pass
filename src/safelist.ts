@@ -13,8 +13,13 @@ export const SAFE_COMMANDS = new Set([
   // JS/TS runtimes & package managers
   "bun", "bunx", "npm", "npx", "yarn", "pnpm", "deno", "tsc",
 
-  // Build tools & other language toolchains
+  // Build tools & language toolchains
   "cargo", "go", "make", "cmake", "pip", "uv", "poetry",
+  "java", "javac", "mvn", "gradle",
+  "gem", "bundle", "rake",
+  "dotnet",
+  "swift", "swiftc",
+  "rustc",
 
   // Process management
   "lsof", "ps", "sleep", "pkill", "killall",
@@ -31,16 +36,41 @@ export const SAFE_COMMANDS = new Set([
 
   // File inspection
   "file", "stat", "strings", "realpath", "basename", "dirname",
+  "less", "more", "xxd", "od", "md5sum", "sha256sum", "sha1sum",
 
   // Shell builtins & utilities
   "echo", "printf", "pwd", "which", "whoami", "test", "true", "false",
   "cd", "pushd", "popd", "export", "set", "unset", "read",
+  "type",
+
+  // System info (read-only)
+  "hostname", "uname", "id", "df", "du", "free", "uptime", "nproc", "arch",
 
   // Scripting (safe subset — no arbitrary code execution)
   "date",
 
   // Dev tools
   "shfmt",
+
+  // Linters & formatters
+  "eslint", "prettier", "biome",
+  "ruff", "black", "mypy", "flake8", "pylint", "isort",
+  "golangci-lint", "gofmt", "rustfmt",
+
+  // Test runners
+  "jest", "vitest", "mocha", "pytest", "phpunit",
+
+  // Archive & compression
+  "tar", "zip", "unzip", "gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz",
+
+  // Clipboard (macOS)
+  "pbcopy", "pbpaste",
+
+  // Version managers
+  "volta", "fnm", "mise", "asdf",
+
+  // Document processing
+  "pandoc",
 
   // Local databases (file-based, no remote server risk)
   "sqlite3",
