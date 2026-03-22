@@ -2,10 +2,10 @@
 description: Scan all Claude Code settings files on the machine, extract Bash allow rules, cross-reference against hall-pass's safelist and inspectors, and integrate missing commands. Use this whenever updating hall-pass command coverage from real-world usage data, consolidating scattered allow rules, checking for safelist gaps, or when the user mentions settings files, allow rules, or wants to expand the safelist from usage patterns.
 ---
 
-# Gather Notes
+# Confiscate Notes
 
-Collect the "notes" (always-allow rules) scattered across Claude Code settings files
-and bring them back to hall-pass for proper handling. This is a multi-phase workflow —
+Confiscate the "notes" (always-allow rules) being passed around in Claude Code settings
+files and bring them back to hall-pass for proper enforcement. This is a multi-phase workflow —
 present findings and wait for user approval before making changes.
 
 ## Phase 1: Scan & Extract
