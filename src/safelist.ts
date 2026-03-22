@@ -36,13 +36,14 @@ export const SAFE_COMMANDS = new Set([
   // ── Text processing ──────────────────────────────────────────────────
   "grep", "egrep", "fgrep", "rg", "sort", "uniq",
   "tr", "cut", "wc", "head", "tail", "tee", "jq",
+  "fold", "column",
 
   // ── File operations ──────────────────────────────────────────────────
   "ls", "cat", "cp", "mv", "mkdir", "ln", "touch", "diff",
 
   // ── File & data inspection ───────────────────────────────────────────
   "file", "stat", "strings", "realpath", "basename", "dirname",
-  "less", "more", "xxd", "od",
+  "less", "more", "xxd", "od", "tree",
   "md5", "md5sum", "sha256sum", "sha1sum",
 
   // ── Shell builtins & utilities ───────────────────────────────────────
@@ -52,18 +53,18 @@ export const SAFE_COMMANDS = new Set([
 
   // ── System info (read-only) ──────────────────────────────────────────
   "hostname", "uname", "id", "df", "du", "free", "uptime", "nproc", "arch",
-  "sw_vers", "sysctl",
+  "sw_vers", "sysctl", "last", "log",
 
   // ── macOS utilities (read-only) ──────────────────────────────────────
   "open", "sips", "mdfind", "mkcert",
   "ioreg", "system_profiler", "vm_stat", "memory_pressure",
-  "dscacheutil", "pmset",
+  "dscacheutil", "pmset", "textutil", "osxphotos", "powermetrics",
 
   // ── Dev tools ────────────────────────────────────────────────────────
   "shfmt", "direnv",
 
   // ── Web servers & deployment ─────────────────────────────────────────
-  "caddy", "vercel",
+  "caddy", "vercel", "ngrok",
 
   // ── Linters & formatters ─────────────────────────────────────────────
   "eslint", "prettier", "biome",
@@ -83,7 +84,7 @@ export const SAFE_COMMANDS = new Set([
   "volta", "fnm", "mise", "asdf",
 
   // ── Document & media processing ──────────────────────────────────────
-  "pandoc",
+  "pandoc", "pdftotext", "pdftoppm", "pdfinfo",
 
   // ── Security & certificates ──────────────────────────────────────────
   "ssh-add", "ssh-keygen",

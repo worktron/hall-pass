@@ -15,8 +15,11 @@ Find all Claude Code settings files and extract Bash allow rules using jq:
 ```bash
 find "$HOME" -path "*/.claude/settings*.json" \
   -not -path "*/node_modules/*" \
-  -not -path "*/.Trash/*" 2>/dev/null
+  -not -path "*/.Trash/*" 2>/dev/null || true
 ```
+
+Note: `find` returns exit code 1 when some directories are permission-denied — the
+`|| true` prevents this from being reported as a failed command.
 
 For each file found, extract Bash rules:
 
@@ -99,8 +102,10 @@ Add tests in `src/inspectors.test.ts` and `src/hook.test.ts`:
 - Unit tests use `cmd()` helper with `expectAllow`/`expectPrompt`
 - Integration tests use `runHook()` with command strings
 
-Run tests: `bun test src/inspectors.test.ts` then `bun test src/hook.test.ts`
-(run separately — Bun can segfault under heavy parallel subprocess load).
+Run all tests:
+```bash
+bun test
+```
 
 ## Phase 5: Cleanup
 

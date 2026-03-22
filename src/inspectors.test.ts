@@ -393,6 +393,33 @@ describe("evaluateBashCommand", () => {
     // Container tools
     test("docker-compose up -d → allow", () => expectAllow(cmd("docker-compose", "up", "-d")))
     test("docker-compose logs → allow", () => expectAllow(cmd("docker-compose", "logs")))
+
+    // Text processing (new)
+    test("fold -w 80 file.txt → allow", () => expectAllow(cmd("fold", "-w", "80", "file.txt")))
+    test("column -t data.tsv → allow", () => expectAllow(cmd("column", "-t", "data.tsv")))
+
+    // File & data inspection (new)
+    test("tree src/ → allow", () => expectAllow(cmd("tree", "src/")))
+    test("tree -L 2 → allow", () => expectAllow(cmd("tree", "-L", "2")))
+
+    // System info (new)
+    test("last → allow", () => expectAllow(cmd("last")))
+    test("last -10 → allow", () => expectAllow(cmd("last", "-10")))
+    test("log show --last 1h → allow", () => expectAllow(cmd("log", "show", "--last", "1h")))
+
+    // macOS utilities (new)
+    test("textutil -convert txt file.docx → allow", () => expectAllow(cmd("textutil", "-convert", "txt", "file.docx")))
+    test("osxphotos query --json → allow", () => expectAllow(cmd("osxphotos", "query", "--json")))
+    test("powermetrics --samplers smc → allow", () => expectAllow(cmd("powermetrics", "--samplers", "smc")))
+
+    // Document & media processing (new)
+    test("pdftotext file.pdf → allow", () => expectAllow(cmd("pdftotext", "file.pdf")))
+    test("pdftoppm file.pdf output → allow", () => expectAllow(cmd("pdftoppm", "file.pdf", "output")))
+    test("pdfinfo file.pdf → allow", () => expectAllow(cmd("pdfinfo", "file.pdf")))
+
+    // Web servers (new)
+    test("ngrok http 3000 → allow", () => expectAllow(cmd("ngrok", "http", "3000")))
+    test("ngrok version → allow", () => expectAllow(cmd("ngrok", "version")))
   })
 
   describe("xcrun", () => {

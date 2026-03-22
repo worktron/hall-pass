@@ -26,7 +26,13 @@ function expectAllow(result: HookResult) {
 }
 
 function expectPrompt(result: HookResult) {
-  expect(result.exitCode).toBe(1)
+  expect(result.exitCode).toBe(0)
+  // Empty stdout = no decision (hook passes through, Claude Code shows default prompt)
+  // Non-empty stdout = explicit "ask" decision
+  if (result.stdout.trim()) {
+    const parsed = JSON.parse(result.stdout)
+    expect(parsed.hookSpecificOutput.permissionDecision).toBe("ask")
+  }
 }
 
 // ============================================================
