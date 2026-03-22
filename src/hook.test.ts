@@ -123,8 +123,9 @@ describe("hook integration", () => {
 
   describe("git — should PROMPT for destructive ops (exit 1)", () => {
     const prompted = [
-      "git push --force",
-      "git push -f origin feat/search",
+      // Force push on feature branches is now allowed (f9dc841)
+      // Only protected branches prompt:
+      "git push --force origin main",
       "git reset --hard",
       "git reset --hard HEAD~3",
       "git clean -f",
@@ -386,6 +387,144 @@ describe("recursive feedback — should ALLOW with additionalContext nudge", () 
   test("find -exec node -e with JSON.parse → allow with jq nudge", async () => {
     const cmd = `find . -exec node -e "JSON.parse(data)" {} \\;`
     expectFeedback(await runHook(cmd), "jq")
+  })
+})
+
+describe("expanded safelist — integration", () => {
+  describe("should ALLOW new safe commands", () => {
+    const allowed = [
+      "brew install node",
+      "brew list",
+      "pip3 install flask",
+      "xcodebuild -project App.xcodeproj",
+      "sw_vers",
+      "dig example.com",
+      "nslookup example.com",
+      "ping -c 3 8.8.8.8",
+      "pgrep node",
+      "open index.html",
+      "ln -s source target",
+      "mdfind 'query'",
+      "system_profiler SPHardwareDataType",
+      "vm_stat",
+      "memory_pressure",
+      "caddy version",
+      "vercel ls",
+      "direnv allow",
+      "ssh-add -l",
+      "ssh-keygen -t ed25519",
+      "docker-compose up -d",
+      "docker-compose logs",
+      "sips -g pixelWidth image.png",
+      "md5 file.bin",
+      "sysctl hw.memsize",
+      "dscacheutil -flushcache",
+      "pmset -g batt",
+      "top -l 1",
+      "dns-sd -B _http._tcp local",
+      "ioreg -l",
+      "mkcert localhost",
+    ]
+
+    for (const cmd of allowed) {
+      test(cmd, async () => {
+        expectAllow(await runHook(cmd))
+      })
+    }
+  })
+
+  describe("should ALLOW timeout wrapping new safe commands", () => {
+    const allowed = [
+      "timeout 30 brew install node",
+      "timeout 10 ping -c 3 8.8.8.8",
+      "timeout 5 caddy reload",
+    ]
+
+    for (const cmd of allowed) {
+      test(cmd, async () => {
+        expectAllow(await runHook(cmd))
+      })
+    }
+  })
+})
+
+describe("new inspectors — integration", () => {
+  describe("xcrun — should evaluate inner command", () => {
+    test("xcrun --show-sdk-path → allow", async () => {
+      expectAllow(await runHook("xcrun --show-sdk-path"))
+    })
+
+    test("xcrun --sdk macosx swiftc main.swift → allow", async () => {
+      expectAllow(await runHook("xcrun --sdk macosx swiftc main.swift"))
+    })
+  })
+
+  describe("ssh — should PROMPT", () => {
+    test("ssh user@host → prompt", async () => {
+      expectPrompt(await runHook("ssh user@host"))
+    })
+  })
+
+  describe("osascript — should PROMPT", () => {
+    test("osascript -e script → prompt", async () => {
+      expectPrompt(await runHook("osascript -e 'display dialog'"))
+    })
+  })
+
+  describe("defaults — read vs write", () => {
+    test("defaults read com.apple.finder → allow", async () => {
+      expectAllow(await runHook("defaults read com.apple.finder"))
+    })
+
+    test("defaults write com.apple.finder Key -bool true → prompt", async () => {
+      expectPrompt(await runHook("defaults write com.apple.finder Key -bool true"))
+    })
+  })
+
+  describe("launchctl — list vs load", () => {
+    test("launchctl list → allow", async () => {
+      expectAllow(await runHook("launchctl list"))
+    })
+
+    test("launchctl load service.plist → prompt", async () => {
+      expectPrompt(await runHook("launchctl load service.plist"))
+    })
+  })
+
+  describe("networksetup — get vs set", () => {
+    test("networksetup -listallnetworkservices → allow", async () => {
+      expectAllow(await runHook("networksetup -listallnetworkservices"))
+    })
+
+    test("networksetup -setdnsservers Wi-Fi 8.8.8.8 → prompt", async () => {
+      expectPrompt(await runHook("networksetup -setdnsservers Wi-Fi 8.8.8.8"))
+    })
+  })
+
+  describe("redis-cli — read vs write", () => {
+    test("redis-cli ping → allow", async () => {
+      expectAllow(await runHook("redis-cli ping"))
+    })
+
+    test("redis-cli get mykey → allow", async () => {
+      expectAllow(await runHook("redis-cli get mykey"))
+    })
+
+    test("redis-cli -h localhost -p 6379 info → allow", async () => {
+      expectAllow(await runHook("redis-cli -h localhost -p 6379 info"))
+    })
+
+    test("redis-cli set mykey value → prompt", async () => {
+      expectPrompt(await runHook("redis-cli set mykey value"))
+    })
+
+    test("redis-cli flushall → prompt", async () => {
+      expectPrompt(await runHook("redis-cli flushall"))
+    })
+
+    test("redis-cli (interactive) → prompt", async () => {
+      expectPrompt(await runHook("redis-cli"))
+    })
   })
 })
 
