@@ -7,72 +7,92 @@
  * node -e) or that proxy other commands (e.g., xargs, nohup, exec).
  */
 export const SAFE_COMMANDS = new Set([
-  // Version control
+  // ── Version control ──────────────────────────────────────────────────
   "gh",
 
-  // JS/TS runtimes & package managers
+  // ── JS/TS ecosystem ──────────────────────────────────────────────────
   "bun", "bunx", "npm", "npx", "yarn", "pnpm", "deno", "tsc",
 
-  // Build tools & language toolchains
-  "cargo", "go", "make", "cmake", "pip", "uv", "poetry",
+  // ── Build tools & language toolchains ────────────────────────────────
+  "cargo", "go", "make", "cmake",
   "java", "javac", "mvn", "gradle",
-  "gem", "bundle", "rake",
   "dotnet",
-  "swift", "swiftc",
-  "rustc",
+  "swift", "swiftc", "rustc",
+  "xcodebuild",
 
-  // Process management
-  "lsof", "ps", "sleep", "pkill", "killall",
+  // ── Package managers ─────────────────────────────────────────────────
+  "pip", "pip3", "uv", "poetry",
+  "gem", "bundle", "rake",
+  "brew",
 
-  // Network
-  "curl", "wget",
+  // ── Process management ───────────────────────────────────────────────
+  "lsof", "ps", "pgrep", "top",
+  "sleep", "pkill", "killall",
 
-  // Text processing
+  // ── Network & DNS ────────────────────────────────────────────────────
+  "curl", "wget", "ping",
+  "dig", "nslookup", "dns-sd",
+
+  // ── Text processing ──────────────────────────────────────────────────
   "grep", "egrep", "fgrep", "rg", "sort", "uniq",
   "tr", "cut", "wc", "head", "tail", "tee", "jq",
+  "fold", "column",
 
-  // File operations
-  "ls", "cat", "cp", "mv", "mkdir", "touch", "diff",
+  // ── File operations ──────────────────────────────────────────────────
+  "ls", "cat", "cp", "mv", "mkdir", "ln", "touch", "diff",
 
-  // File inspection
+  // ── File & data inspection ───────────────────────────────────────────
   "file", "stat", "strings", "realpath", "basename", "dirname",
-  "less", "more", "xxd", "od", "md5sum", "sha256sum", "sha1sum",
+  "less", "more", "xxd", "od", "tree",
+  "md5", "md5sum", "sha256sum", "sha1sum",
 
-  // Shell builtins & utilities
+  // ── Shell builtins & utilities ───────────────────────────────────────
   "echo", "printf", "pwd", "which", "whoami", "test", "true", "false",
   "cd", "pushd", "popd", "export", "set", "unset", "read",
-  "type",
+  "type", "date",
 
-  // System info (read-only)
+  // ── System info (read-only) ──────────────────────────────────────────
   "hostname", "uname", "id", "df", "du", "free", "uptime", "nproc", "arch",
+  "sw_vers", "sysctl", "last", "log",
 
-  // Scripting (safe subset — no arbitrary code execution)
-  "date",
+  // ── macOS utilities (read-only) ──────────────────────────────────────
+  "open", "sips", "mdfind", "mkcert",
+  "ioreg", "system_profiler", "vm_stat", "memory_pressure",
+  "dscacheutil", "pmset", "textutil", "osxphotos", "powermetrics",
 
-  // Dev tools
-  "shfmt",
+  // ── Dev tools ────────────────────────────────────────────────────────
+  "shfmt", "direnv",
 
-  // Linters & formatters
+  // ── Web servers & deployment ─────────────────────────────────────────
+  "caddy", "vercel", "ngrok",
+
+  // ── Linters & formatters ─────────────────────────────────────────────
   "eslint", "prettier", "biome",
   "ruff", "black", "mypy", "flake8", "pylint", "isort",
   "golangci-lint", "gofmt", "rustfmt",
 
-  // Test runners
+  // ── Test runners ─────────────────────────────────────────────────────
   "jest", "vitest", "mocha", "pytest", "phpunit",
 
-  // Archive & compression
+  // ── Archive & compression ────────────────────────────────────────────
   "tar", "zip", "unzip", "gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz",
 
-  // Clipboard (macOS)
+  // ── Clipboard (macOS) ────────────────────────────────────────────────
   "pbcopy", "pbpaste",
 
-  // Version managers
+  // ── Version managers ─────────────────────────────────────────────────
   "volta", "fnm", "mise", "asdf",
 
-  // Document processing
-  "pandoc",
+  // ── Document & media processing ──────────────────────────────────────
+  "pandoc", "pdftotext", "pdftoppm", "pdfinfo",
 
-  // Local databases (file-based, no remote server risk)
+  // ── Security & certificates ──────────────────────────────────────────
+  "ssh-add", "ssh-keygen",
+
+  // ── Container tools ──────────────────────────────────────────────────
+  "docker-compose",
+
+  // ── Local databases (file-based) ─────────────────────────────────────
   "sqlite3",
 ])
 

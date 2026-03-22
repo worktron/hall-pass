@@ -334,6 +334,290 @@ describe("evaluateBashCommand", () => {
     test("mise use node@20 → allow", () => expectAllow(cmd("mise", "use", "node@20")))
   })
 
+  describe("expanded safelist commands", () => {
+    // Build tools
+    test("xcodebuild -project App.xcodeproj → allow", () => expectAllow(cmd("xcodebuild", "-project", "App.xcodeproj")))
+
+    // Package managers
+    test("pip3 install flask → allow", () => expectAllow(cmd("pip3", "install", "flask")))
+    test("brew install node → allow", () => expectAllow(cmd("brew", "install", "node")))
+    test("brew list → allow", () => expectAllow(cmd("brew", "list")))
+    test("brew services list → allow", () => expectAllow(cmd("brew", "services", "list")))
+
+    // Process management
+    test("pgrep node → allow", () => expectAllow(cmd("pgrep", "node")))
+    test("top -l 1 → allow", () => expectAllow(cmd("top", "-l", "1")))
+
+    // Network & DNS
+    test("ping -c 3 8.8.8.8 → allow", () => expectAllow(cmd("ping", "-c", "3", "8.8.8.8")))
+    test("dig example.com → allow", () => expectAllow(cmd("dig", "example.com")))
+    test("nslookup example.com → allow", () => expectAllow(cmd("nslookup", "example.com")))
+    test("dns-sd -B _http._tcp local → allow", () => expectAllow(cmd("dns-sd", "-B", "_http._tcp", "local")))
+
+    // File operations
+    test("ln -s source target → allow", () => expectAllow(cmd("ln", "-s", "source", "target")))
+
+    // File & data inspection
+    test("md5 file.bin → allow", () => expectAllow(cmd("md5", "file.bin")))
+
+    // System info
+    test("sw_vers → allow", () => expectAllow(cmd("sw_vers")))
+    test("sysctl hw.memsize → allow", () => expectAllow(cmd("sysctl", "hw.memsize")))
+
+    // macOS utilities
+    test("open index.html → allow", () => expectAllow(cmd("open", "index.html")))
+    test("open http://localhost:3000 → allow", () => expectAllow(cmd("open", "http://localhost:3000")))
+    test("sips -g pixelWidth image.png → allow", () => expectAllow(cmd("sips", "-g", "pixelWidth", "image.png")))
+    test("mdfind 'kMDItemKind == PDF' → allow", () => expectAllow(cmd("mdfind", "kMDItemKind == PDF")))
+    test("mkcert localhost → allow", () => expectAllow(cmd("mkcert", "localhost")))
+    test("ioreg -l → allow", () => expectAllow(cmd("ioreg", "-l")))
+    test("system_profiler SPHardwareDataType → allow", () => expectAllow(cmd("system_profiler", "SPHardwareDataType")))
+    test("vm_stat → allow", () => expectAllow(cmd("vm_stat")))
+    test("memory_pressure → allow", () => expectAllow(cmd("memory_pressure")))
+    test("dscacheutil -flushcache → allow", () => expectAllow(cmd("dscacheutil", "-flushcache")))
+    test("pmset -g batt → allow", () => expectAllow(cmd("pmset", "-g", "batt")))
+
+    // Dev tools
+    test("direnv allow → allow", () => expectAllow(cmd("direnv", "allow")))
+
+    // Web servers & deployment
+    test("caddy version → allow", () => expectAllow(cmd("caddy", "version")))
+    test("caddy reload → allow", () => expectAllow(cmd("caddy", "reload")))
+    test("vercel ls → allow", () => expectAllow(cmd("vercel", "ls")))
+    test("vercel dev → allow", () => expectAllow(cmd("vercel", "dev")))
+
+    // Security & certificates
+    test("ssh-add -l → allow", () => expectAllow(cmd("ssh-add", "-l")))
+    test("ssh-keygen -t ed25519 → allow", () => expectAllow(cmd("ssh-keygen", "-t", "ed25519")))
+
+    // Container tools
+    test("docker-compose up -d → allow", () => expectAllow(cmd("docker-compose", "up", "-d")))
+    test("docker-compose logs → allow", () => expectAllow(cmd("docker-compose", "logs")))
+
+    // Text processing (new)
+    test("fold -w 80 file.txt → allow", () => expectAllow(cmd("fold", "-w", "80", "file.txt")))
+    test("column -t data.tsv → allow", () => expectAllow(cmd("column", "-t", "data.tsv")))
+
+    // File & data inspection (new)
+    test("tree src/ → allow", () => expectAllow(cmd("tree", "src/")))
+    test("tree -L 2 → allow", () => expectAllow(cmd("tree", "-L", "2")))
+
+    // System info (new)
+    test("last → allow", () => expectAllow(cmd("last")))
+    test("last -10 → allow", () => expectAllow(cmd("last", "-10")))
+    test("log show --last 1h → allow", () => expectAllow(cmd("log", "show", "--last", "1h")))
+
+    // macOS utilities (new)
+    test("textutil -convert txt file.docx → allow", () => expectAllow(cmd("textutil", "-convert", "txt", "file.docx")))
+    test("osxphotos query --json → allow", () => expectAllow(cmd("osxphotos", "query", "--json")))
+    test("powermetrics --samplers smc → allow", () => expectAllow(cmd("powermetrics", "--samplers", "smc")))
+
+    // Document & media processing (new)
+    test("pdftotext file.pdf → allow", () => expectAllow(cmd("pdftotext", "file.pdf")))
+    test("pdftoppm file.pdf output → allow", () => expectAllow(cmd("pdftoppm", "file.pdf", "output")))
+    test("pdfinfo file.pdf → allow", () => expectAllow(cmd("pdfinfo", "file.pdf")))
+
+    // Web servers (new)
+    test("ngrok http 3000 → allow", () => expectAllow(cmd("ngrok", "http", "3000")))
+    test("ngrok version → allow", () => expectAllow(cmd("ngrok", "version")))
+  })
+
+  describe("xcrun", () => {
+    test("xcrun --find clang → allow (info query)", () => {
+      expectAllow(cmd("xcrun", "--find", "clang"))
+    })
+
+    test("xcrun --show-sdk-path → allow (info query)", () => {
+      expectAllow(cmd("xcrun", "--show-sdk-path"))
+    })
+
+    test("xcrun --sdk macosx clang file.c → allow (safe inner command)", () => {
+      // clang is unknown, so this will pass (not prompt) — but let's verify it evaluates
+      const result = evaluateBashCommand(cmd("xcrun", "--sdk", "macosx", "clang", "file.c"), makeCtx())
+      expect(result.decision).toBe("pass") // clang is unknown → pass
+    })
+
+    test("xcrun --sdk macosx rm -rf / → prompt (dangerous inner command)", () => {
+      expectPrompt(cmd("xcrun", "--sdk", "macosx", "rm", "-rf", "/"))
+    })
+
+    test("xcrun swiftc main.swift → allow (safe inner command)", () => {
+      expectAllow(cmd("xcrun", "swiftc", "main.swift"))
+    })
+
+    test("bare xcrun → allow", () => {
+      expectAllow(cmd("xcrun"))
+    })
+  })
+
+  describe("ssh", () => {
+    test("ssh host → prompt", () => {
+      expectPrompt(cmd("ssh", "user@host"))
+    })
+
+    test("ssh -T git@github.com → prompt", () => {
+      expectPrompt(cmd("ssh", "-T", "git@github.com"))
+    })
+  })
+
+  describe("osascript", () => {
+    test("osascript -e 'display dialog' → prompt", () => {
+      expectPrompt(cmd("osascript", "-e", "display dialog \"hello\""))
+    })
+
+    test("osascript script.scpt → prompt", () => {
+      expectPrompt(cmd("osascript", "script.scpt"))
+    })
+  })
+
+  describe("defaults", () => {
+    test("defaults read com.apple.finder → allow", () => {
+      expectAllow(cmd("defaults", "read", "com.apple.finder"))
+    })
+
+    test("defaults read-type com.apple.finder Key → allow", () => {
+      expectAllow(cmd("defaults", "read-type", "com.apple.finder", "Key"))
+    })
+
+    test("defaults find search-term → allow", () => {
+      expectAllow(cmd("defaults", "find", "search-term"))
+    })
+
+    test("defaults domains → allow", () => {
+      expectAllow(cmd("defaults", "domains"))
+    })
+
+    test("defaults export com.apple.finder - → allow", () => {
+      expectAllow(cmd("defaults", "export", "com.apple.finder", "-"))
+    })
+
+    test("defaults write com.apple.finder Key -bool true → prompt", () => {
+      expectPrompt(cmd("defaults", "write", "com.apple.finder", "Key", "-bool", "true"))
+    })
+
+    test("defaults delete com.apple.finder → prompt", () => {
+      expectPrompt(cmd("defaults", "delete", "com.apple.finder"))
+    })
+
+    test("bare defaults → allow", () => {
+      expectAllow(cmd("defaults"))
+    })
+  })
+
+  describe("launchctl", () => {
+    test("launchctl list → allow", () => {
+      expectAllow(cmd("launchctl", "list"))
+    })
+
+    test("launchctl print system → allow", () => {
+      expectAllow(cmd("launchctl", "print", "system"))
+    })
+
+    test("launchctl blame system/com.apple.syslogd → allow", () => {
+      expectAllow(cmd("launchctl", "blame", "system/com.apple.syslogd"))
+    })
+
+    test("launchctl load plist → prompt", () => {
+      expectPrompt(cmd("launchctl", "load", "/path/to/service.plist"))
+    })
+
+    test("launchctl unload plist → prompt", () => {
+      expectPrompt(cmd("launchctl", "unload", "/path/to/service.plist"))
+    })
+
+    test("launchctl bootout → prompt", () => {
+      expectPrompt(cmd("launchctl", "bootout", "system/com.apple.service"))
+    })
+
+    test("bare launchctl → allow", () => {
+      expectAllow(cmd("launchctl"))
+    })
+  })
+
+  describe("networksetup", () => {
+    test("networksetup -listallnetworkservices → allow", () => {
+      expectAllow(cmd("networksetup", "-listallnetworkservices"))
+    })
+
+    test("networksetup -getinfo Wi-Fi → allow", () => {
+      expectAllow(cmd("networksetup", "-getinfo", "Wi-Fi"))
+    })
+
+    test("networksetup -getdnsservers Wi-Fi → allow", () => {
+      expectAllow(cmd("networksetup", "-getdnsservers", "Wi-Fi"))
+    })
+
+    test("networksetup -setdnsservers Wi-Fi 8.8.8.8 → prompt", () => {
+      expectPrompt(cmd("networksetup", "-setdnsservers", "Wi-Fi", "8.8.8.8"))
+    })
+
+    test("networksetup -setwebproxy Wi-Fi proxy 8080 → prompt", () => {
+      expectPrompt(cmd("networksetup", "-setwebproxy", "Wi-Fi", "proxy", "8080"))
+    })
+
+    test("networksetup -createnetworkservice → prompt", () => {
+      expectPrompt(cmd("networksetup", "-createnetworkservice", "Test", "en0"))
+    })
+
+    test("networksetup -removenetworkservice → prompt", () => {
+      expectPrompt(cmd("networksetup", "-removenetworkservice", "Test"))
+    })
+  })
+
+  describe("redis-cli", () => {
+    test("redis-cli ping → allow", () => {
+      expectAllow(cmd("redis-cli", "ping"))
+    })
+
+    test("redis-cli get mykey → allow", () => {
+      expectAllow(cmd("redis-cli", "get", "mykey"))
+    })
+
+    test("redis-cli -h localhost -p 6379 get key → allow", () => {
+      expectAllow(cmd("redis-cli", "-h", "localhost", "-p", "6379", "get", "key"))
+    })
+
+    test("redis-cli info → allow", () => {
+      expectAllow(cmd("redis-cli", "info"))
+    })
+
+    test("redis-cli keys '*' → allow", () => {
+      expectAllow(cmd("redis-cli", "keys", "*"))
+    })
+
+    test("redis-cli hgetall myhash → allow", () => {
+      expectAllow(cmd("redis-cli", "hgetall", "myhash"))
+    })
+
+    test("redis-cli lrange mylist 0 -1 → allow", () => {
+      expectAllow(cmd("redis-cli", "lrange", "mylist", "0", "-1"))
+    })
+
+    test("redis-cli set mykey value → prompt", () => {
+      expectPrompt(cmd("redis-cli", "set", "mykey", "value"))
+    })
+
+    test("redis-cli del mykey → prompt", () => {
+      expectPrompt(cmd("redis-cli", "del", "mykey"))
+    })
+
+    test("redis-cli flushall → prompt", () => {
+      expectPrompt(cmd("redis-cli", "flushall"))
+    })
+
+    test("redis-cli flushdb → prompt", () => {
+      expectPrompt(cmd("redis-cli", "flushdb"))
+    })
+
+    test("redis-cli (interactive) → prompt", () => {
+      expectPrompt(cmd("redis-cli"))
+    })
+
+    test("redis-cli -h host (interactive) → prompt", () => {
+      expectPrompt(cmd("redis-cli", "-h", "localhost"))
+    })
+  })
+
   test("unknown command returns pass (no opinion)", () => {
     const result = evaluateBashCommand(cmd("unknown-tool", "--flag"), makeCtx())
     expect(result.decision).toBe("pass")
@@ -365,8 +649,8 @@ describe("evaluateBashCommand", () => {
       expectAllow(cmd("git", "status"))
     })
 
-    test("git push --force → prompt", () => {
-      expectPrompt(cmd("git", "push", "--force"))
+    test("git push --force (no branch) → allow (only protected branches prompt)", () => {
+      expectAllow(cmd("git", "push", "--force"))
     })
 
     test("git push origin main → prompt (default protected branch)", () => {

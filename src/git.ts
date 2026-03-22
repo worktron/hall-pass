@@ -172,9 +172,11 @@ export function isGitCommandSafe(argsOrCommand: string[] | string, customProtect
     return true
   }
 
-  // Check for destructive flags on otherwise-safe commands
+  // Check for destructive flags on otherwise-safe commands.
+  // For branch-gated commands (push, rebase), destructive flags are only
+  // dangerous on protected branches — force pushing a feature branch is normal.
   const dangerousFlags = DESTRUCTIVE_FLAGS[subcommand]
-  if (dangerousFlags) {
+  if (dangerousFlags && !BRANCH_GATED_SUBCOMMANDS.has(subcommand)) {
     for (const flag of flags) {
       if (dangerousFlags.has(flag)) return false
     }
@@ -184,17 +186,14 @@ export function isGitCommandSafe(argsOrCommand: string[] | string, customProtect
     }
   }
 
-  // Branch-gated commands: check which branch
+  // Branch-gated commands: safe on feature branches, prompt on protected branches.
+  // Force flags are only dangerous when targeting a protected branch.
   if (BRANCH_GATED_SUBCOMMANDS.has(subcommand)) {
     const branches = customProtectedBranches ?? PROTECTED_BRANCHES
-    // Check if pushing to a protected branch
-    // git push origin main, git push origin HEAD:main
     for (const arg of rest) {
       const target = arg.includes(":") ? arg.split(":").pop()! : arg
       if (branches.has(target)) return false
     }
-    // git push with no branch specified — check for force flags only
-    // (already checked above), otherwise allow
     return true
   }
 

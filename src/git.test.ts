@@ -82,12 +82,37 @@ describe("isGitCommandSafe", () => {
     }
   })
 
-  describe("destructive operations — should prompt", () => {
-    const dangerous = [
-      // Force push
+  describe("force push to feature branches — should be safe", () => {
+    const safe = [
       "git push --force",
       "git push -f origin feat/search",
       "git push --force-with-lease",
+      "git push --force-with-lease origin feat/search",
+      "git push origin HEAD --force-with-lease",
+      "git push origin HEAD --force",
+    ]
+
+    for (const cmd of safe) {
+      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(true))
+    }
+  })
+
+  describe("force push to protected branches — should prompt", () => {
+    const dangerous = [
+      "git push --force origin main",
+      "git push -f origin main",
+      "git push --force-with-lease origin main",
+      "git push --force origin HEAD:main",
+      "git push -f origin HEAD:staging",
+    ]
+
+    for (const cmd of dangerous) {
+      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(false))
+    }
+  })
+
+  describe("destructive operations — should prompt", () => {
+    const dangerous = [
       // Reset
       "git reset --hard",
       "git reset --hard HEAD~3",
@@ -116,8 +141,12 @@ describe("isGitCommandSafe", () => {
       expect(isGitCommandSafe("git -C /some/path status")).toBe(true)
     })
 
-    test("git -C /path push --force", () => {
-      expect(isGitCommandSafe("git -C /some/path push --force")).toBe(false)
+    test("git -C /path push --force (feature branch)", () => {
+      expect(isGitCommandSafe("git -C /some/path push --force")).toBe(true)
+    })
+
+    test("git -C /path push --force to main", () => {
+      expect(isGitCommandSafe("git -C /some/path push --force origin main")).toBe(false)
     })
 
     test("git -C /path add .", () => {
@@ -142,8 +171,12 @@ describe("isGitCommandSafe", () => {
       expect(isGitCommandSafe(["git", "push", "-u", "origin", "feat/search"])).toBe(true)
     })
 
-    test("unsafe: parsed git push --force", () => {
-      expect(isGitCommandSafe(["git", "push", "--force"])).toBe(false)
+    test("safe: parsed git push --force (feature branch)", () => {
+      expect(isGitCommandSafe(["git", "push", "--force"])).toBe(true)
+    })
+
+    test("unsafe: parsed git push --force to main", () => {
+      expect(isGitCommandSafe(["git", "push", "--force", "origin", "main"])).toBe(false)
     })
 
     test("unsafe: parsed git push to protected branch", () => {
