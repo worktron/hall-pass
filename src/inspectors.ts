@@ -263,6 +263,105 @@ export const INSPECTORS: Record<string, Inspector> = {
     }
     return allow("python3: script runner")
   },
+
+  // -- Command wrappers (proxy another command) --
+
+  xcrun: (cmdInfo, ctx) => {
+    const args = cmdInfo.args
+    // xcrun [options] tool [args...]
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]
+      if (arg === "--sdk" || arg === "--toolchain") { i++; continue }
+      if (arg === "--find" || arg === "--show-sdk-path" || arg === "--show-sdk-version" ||
+          arg === "--show-sdk-platform-path" || arg === "--show-sdk-platform-version") {
+        return allow("xcrun: info query")
+      }
+      if (arg === "-l" || arg === "--log" || arg === "-n" || arg === "--no-cache") continue
+      if (arg.startsWith("-")) continue
+      // First non-flag arg is the tool to run
+      const subArgs = args.slice(i)
+      const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
+      return ctx.evaluate(subCmd)
+    }
+    return allow("xcrun: no tool specified")
+  },
+
+  // -- Remote access & scripting --
+
+  ssh: () => {
+    return prompt("ssh: remote access")
+  },
+
+  osascript: () => {
+    return prompt("osascript: AppleScript execution")
+  },
+
+  // -- Commands with safe/unsafe subcommands --
+
+  defaults: (cmdInfo) => {
+    const args = cmdInfo.args
+    if (args.length < 2) return allow("defaults: no subcommand")
+    const subcmd = args[1]
+    const readCmds = new Set(["read", "read-type", "find", "domains", "export"])
+    if (readCmds.has(subcmd)) return allow(`defaults: ${subcmd}`)
+    return prompt(`defaults: ${subcmd}`)
+  },
+
+  launchctl: (cmdInfo) => {
+    const args = cmdInfo.args
+    if (args.length < 2) return allow("launchctl: no subcommand")
+    const subcmd = args[1]
+    const safeCmds = new Set(["list", "print", "blame", "dumpstate", "dumpjpcategory"])
+    if (safeCmds.has(subcmd)) return allow(`launchctl: ${subcmd}`)
+    return prompt(`launchctl: ${subcmd}`)
+  },
+
+  networksetup: (cmdInfo) => {
+    const args = cmdInfo.args
+    for (const arg of args) {
+      if (arg.startsWith("-set") || arg.startsWith("-create") ||
+          arg.startsWith("-remove") || arg.startsWith("-add") ||
+          arg === "-ordernetworkservices" || arg === "-switchtodefault") {
+        return prompt("networksetup: modifies network config")
+      }
+    }
+    return allow("networksetup: read-only query")
+  },
+
+  "redis-cli": (cmdInfo) => {
+    const args = cmdInfo.args
+    // redis-cli [options] [command [args...]]
+    // Find the Redis command (first non-flag, non-value positional arg)
+    const READ_ONLY_CMDS = new Set([
+      "ping", "echo", "info", "dbsize", "time", "lastsave",
+      "get", "mget", "strlen", "getrange", "exists", "type", "ttl", "pttl",
+      "keys", "scan", "randomkey", "object",
+      "llen", "lrange", "lindex",
+      "scard", "smembers", "sismember", "srandmember", "sscan",
+      "hget", "hgetall", "hlen", "hkeys", "hvals", "hexists", "hmget", "hscan",
+      "zcard", "zrange", "zrangebyscore", "zscore", "zrank", "zscan", "zcount",
+      "xlen", "xrange", "xrevrange", "xinfo",
+      "pubsub", "client",
+    ])
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]
+      // Skip redis-cli flags and their values
+      if (arg === "-h" || arg === "-p" || arg === "-a" || arg === "-n" ||
+          arg === "-u" || arg === "--user" || arg === "--pass" ||
+          arg === "--tls-cert" || arg === "--tls-key" || arg === "--tls-ca-cert") {
+        i++; continue
+      }
+      if (arg === "--tls" || arg === "--no-auth-warning" || arg === "--resp2" || arg === "--resp3") continue
+      if (arg.startsWith("-")) continue
+      // First positional is the Redis command
+      if (READ_ONLY_CMDS.has(arg.toLowerCase())) {
+        return allow(`redis-cli: ${arg.toLowerCase()}`)
+      }
+      return prompt(`redis-cli: ${arg.toLowerCase()}`)
+    }
+    // No command = interactive mode
+    return prompt("redis-cli: interactive session")
+  },
 }
 
 /**
