@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
-import { isGitCommandSafe } from "./git.ts"
+import { checkGitCommand } from "./git.ts"
 
-describe("isGitCommandSafe", () => {
+describe("checkGitCommand", () => {
   describe("read-only commands — should be safe", () => {
     const safe = [
       "git status",
@@ -25,7 +25,7 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of safe) {
-      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(true))
+      test(cmd, () => expect(checkGitCommand(cmd).safe).toBe(true))
     }
   })
 
@@ -49,7 +49,7 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of safe) {
-      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(true))
+      test(cmd, () => expect(checkGitCommand(cmd).safe).toBe(true))
     }
   })
 
@@ -64,7 +64,7 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of safe) {
-      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(true))
+      test(cmd, () => expect(checkGitCommand(cmd).safe).toBe(true))
     }
   })
 
@@ -78,7 +78,7 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of dangerous) {
-      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(false))
+      test(cmd, () => expect(checkGitCommand(cmd).safe).toBe(false))
     }
   })
 
@@ -93,7 +93,7 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of safe) {
-      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(true))
+      test(cmd, () => expect(checkGitCommand(cmd).safe).toBe(true))
     }
   })
 
@@ -107,7 +107,7 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of dangerous) {
-      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(false))
+      test(cmd, () => expect(checkGitCommand(cmd).safe).toBe(false))
     }
   })
 
@@ -132,63 +132,63 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of dangerous) {
-      test(cmd, () => expect(isGitCommandSafe(cmd)).toBe(false))
+      test(cmd, () => expect(checkGitCommand(cmd).safe).toBe(false))
     }
   })
 
   describe("git with path prefix — should still work", () => {
     test("git -C /path status", () => {
-      expect(isGitCommandSafe("git -C /some/path status")).toBe(true)
+      expect(checkGitCommand("git -C /some/path status").safe).toBe(true)
     })
 
     test("git -C /path push --force (feature branch)", () => {
-      expect(isGitCommandSafe("git -C /some/path push --force")).toBe(true)
+      expect(checkGitCommand("git -C /some/path push --force").safe).toBe(true)
     })
 
     test("git -C /path push --force to main", () => {
-      expect(isGitCommandSafe("git -C /some/path push --force origin main")).toBe(false)
+      expect(checkGitCommand("git -C /some/path push --force origin main").safe).toBe(false)
     })
 
     test("git -C /path add .", () => {
-      expect(isGitCommandSafe("git -C /some/path add .")).toBe(true)
+      expect(checkGitCommand("git -C /some/path add .").safe).toBe(true)
     })
 
     test("git -C /path reset --hard", () => {
-      expect(isGitCommandSafe("git -C /some/path reset --hard")).toBe(false)
+      expect(checkGitCommand("git -C /some/path reset --hard").safe).toBe(false)
     })
   })
 
   test("bare git — safe (shows help)", () => {
-    expect(isGitCommandSafe("git")).toBe(true)
+    expect(checkGitCommand("git").safe).toBe(true)
   })
 
   describe("accepts pre-parsed args array (from shfmt)", () => {
     test("safe: parsed git status", () => {
-      expect(isGitCommandSafe(["git", "status"])).toBe(true)
+      expect(checkGitCommand(["git", "status"]).safe).toBe(true)
     })
 
     test("safe: parsed git push to feature branch", () => {
-      expect(isGitCommandSafe(["git", "push", "-u", "origin", "feat/search"])).toBe(true)
+      expect(checkGitCommand(["git", "push", "-u", "origin", "feat/search"]).safe).toBe(true)
     })
 
     test("safe: parsed git push --force (feature branch)", () => {
-      expect(isGitCommandSafe(["git", "push", "--force"])).toBe(true)
+      expect(checkGitCommand(["git", "push", "--force"]).safe).toBe(true)
     })
 
     test("unsafe: parsed git push --force to main", () => {
-      expect(isGitCommandSafe(["git", "push", "--force", "origin", "main"])).toBe(false)
+      expect(checkGitCommand(["git", "push", "--force", "origin", "main"]).safe).toBe(false)
     })
 
     test("unsafe: parsed git push to protected branch", () => {
-      expect(isGitCommandSafe(["git", "push", "origin", "main"])).toBe(false)
+      expect(checkGitCommand(["git", "push", "origin", "main"]).safe).toBe(false)
     })
 
     test("safe: parsed git commit with message", () => {
-      expect(isGitCommandSafe(["git", "commit", "-m", "feat: add feature"])).toBe(true)
+      expect(checkGitCommand(["git", "commit", "-m", "feat: add feature"]).safe).toBe(true)
     })
 
     test("unsafe: parsed git reset --hard", () => {
-      expect(isGitCommandSafe(["git", "reset", "--hard"])).toBe(false)
+      expect(checkGitCommand(["git", "reset", "--hard"]).safe).toBe(false)
     })
   })
 
@@ -202,7 +202,7 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of safeConfigs) {
-      test(`safe: ${cmd}`, () => expect(isGitCommandSafe(cmd)).toBe(true))
+      test(`safe: ${cmd}`, () => expect(checkGitCommand(cmd).safe).toBe(true))
     }
 
     const dangerousConfigs = [
@@ -215,7 +215,7 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of dangerousConfigs) {
-      test(`unsafe: ${cmd}`, () => expect(isGitCommandSafe(cmd)).toBe(false))
+      test(`unsafe: ${cmd}`, () => expect(checkGitCommand(cmd).safe).toBe(false))
     }
   })
 
@@ -230,11 +230,11 @@ describe("isGitCommandSafe", () => {
     ]
 
     for (const cmd of dangerous) {
-      test(`unsafe: ${cmd}`, () => expect(isGitCommandSafe(cmd)).toBe(false))
+      test(`unsafe: ${cmd}`, () => expect(checkGitCommand(cmd).safe).toBe(false))
     }
 
     test("safe: git -c color.ui=auto status", () => {
-      expect(isGitCommandSafe("git -c color.ui=auto status")).toBe(true)
+      expect(checkGitCommand("git -c color.ui=auto status").safe).toBe(true)
     })
   })
 })

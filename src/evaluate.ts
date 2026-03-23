@@ -26,7 +26,7 @@ import { extractSqlFromArgs, isSqlReadOnly } from "./sql.ts"
 
 export type EvalResult =
   | { decision: "allow"; reason: string }
-  | { decision: "prompt"; reason: string }
+  | { decision: "prompt"; reason: string; message: string }
   | { decision: "pass"; reason: string }
   | { decision: "feedback"; suggestion: string }
 
@@ -76,7 +76,7 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
   // 2. Check env var assignments for dangerous variables
   for (const assign of cmdInfo.assigns) {
     if (DANGEROUS_ENV_VARS.has(assign.name)) {
-      return { decision: "prompt", reason: `dangerous env: ${assign.name}` }
+      return { decision: "prompt", reason: `dangerous env: ${assign.name}`, message: `Sets dangerous variable "${assign.name}"` }
     }
   }
 
@@ -90,7 +90,7 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
   if (isPathAwareCommand(name)) {
     const pathDecision = checkCommandPaths(cmdInfo, ctx.config)
     if (!pathDecision.allowed) {
-      return { decision: "prompt", reason: `path-blocked: ${name} ${pathDecision.reason}` }
+      return { decision: "prompt", reason: `path-blocked: ${name} ${pathDecision.reason}`, message: `"${name}" targets ${pathDecision.reason}` }
     }
   }
 
@@ -112,7 +112,7 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
 
   // 7. Dangerous commands — always prompt
   if (DANGEROUS_COMMANDS.has(name)) {
-    return { decision: "prompt", reason: `dangerous: ${name}` }
+    return { decision: "prompt", reason: `dangerous: ${name}`, message: `"${name}" is a destructive command` }
   }
 
   // 8. Unknown command → pass (no opinion, let Claude Code decide)
@@ -129,5 +129,5 @@ function dbClientInspect(cmdInfo: CommandInfo): EvalResult {
   if (sql && readOnly) {
     return { decision: "allow", reason: `db read-only: ${name}` }
   }
-  return { decision: "prompt", reason: `db client: ${name}` }
+  return { decision: "prompt", reason: `db client: ${name}`, message: `"${name}" session may modify data` }
 }

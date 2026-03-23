@@ -5,8 +5,12 @@
  * Read-only commands and safe local writes are allowed.
  * Destructive operations that can lose work are flagged.
  *
- * Returns true if the git command is safe to auto-approve.
+ * Returns a GitDecision — safe: true or safe: false with reason + human message.
  */
+
+export type GitDecision =
+  | { safe: true }
+  | { safe: false; reason: string; message: string }
 
 /**
  * Git subcommands that are always safe (read-only or easily reversible).
@@ -130,7 +134,10 @@ function parseGitCommand(args: string[]): { subcommand: string; flags: string[];
  * Accepts either pre-parsed args (from shfmt AST) or a raw command string.
  * Prefer passing parsed args to avoid redundant tokenization.
  */
-export function isGitCommandSafe(argsOrCommand: string[] | string, customProtectedBranches?: Set<string>): boolean {
+const safe: GitDecision = { safe: true }
+const unsafe = (reason: string, message: string): GitDecision => ({ safe: false, reason, message })
+
+export function checkGitCommand(argsOrCommand: string[] | string, customProtectedBranches?: Set<string>): GitDecision {
   const args = typeof argsOrCommand === "string"
     ? tokenize(argsOrCommand)
     : [...argsOrCommand]
@@ -140,36 +147,46 @@ export function isGitCommandSafe(argsOrCommand: string[] | string, customProtect
 
   const { subcommand, flags, rest, configs } = parseGitCommand(args)
 
-  if (!subcommand) return true // bare "git" — safe (just shows help)
+  if (!subcommand) return safe // bare "git" — safe (just shows help)
 
   // Check for dangerous -c config values (e.g., git -c core.fsmonitor="evil" status)
   for (const config of configs) {
     const key = config.split("=")[0].toLowerCase()
     for (const dangerous of DANGEROUS_GIT_CONFIGS) {
-      if (key.startsWith(dangerous.toLowerCase())) return false
+      if (key.startsWith(dangerous.toLowerCase())) {
+        return unsafe(`git: dangerous -c config ${key}`, `git -c sets executable config key "${key}"`)
+      }
     }
   }
 
   // Always destructive — prompt no matter what
-  if (ALWAYS_DESTRUCTIVE.has(subcommand)) return false
+  if (ALWAYS_DESTRUCTIVE.has(subcommand)) {
+    const messages: Record<string, string> = {
+      reset: "git reset can discard commits and staged changes",
+      clean: "git clean deletes untracked files permanently",
+    }
+    return unsafe(`git: destructive subcommand ${subcommand}`, messages[subcommand] ?? `git ${subcommand} is destructive`)
+  }
 
   // git config — safe for reads, dangerous for writes that set executable values
   if (subcommand === "config") {
     // git config --get, --list, --get-regexp, etc. = safe reads
     const readFlags = new Set(["--get", "--get-all", "--get-regexp", "--list", "-l", "--show-origin", "--show-scope"])
     for (const flag of flags) {
-      if (readFlags.has(flag)) return true
+      if (readFlags.has(flag)) return safe
     }
     // git config key (no value) = read, git config key value = write
     // If there are 2+ positional args, it's a write — check if the key is dangerous
     if (rest.length >= 2) {
       const key = rest[0].toLowerCase()
       for (const dangerous of DANGEROUS_GIT_CONFIGS) {
-        if (key.startsWith(dangerous.toLowerCase())) return false
+        if (key.startsWith(dangerous.toLowerCase())) {
+          return unsafe(`git: dangerous config write ${key}`, `git config sets executable key "${key}"`)
+        }
       }
     }
     // Single arg = read, or non-dangerous write
-    return true
+    return safe
   }
 
   // Check for destructive flags on otherwise-safe commands.
@@ -178,11 +195,15 @@ export function isGitCommandSafe(argsOrCommand: string[] | string, customProtect
   const dangerousFlags = DESTRUCTIVE_FLAGS[subcommand]
   if (dangerousFlags && !BRANCH_GATED_SUBCOMMANDS.has(subcommand)) {
     for (const flag of flags) {
-      if (dangerousFlags.has(flag)) return false
+      if (dangerousFlags.has(flag)) {
+        return unsafe(`git: ${subcommand} ${flag}`, describeDestructiveFlag(subcommand, flag))
+      }
     }
     // Also check rest args for things like "git checkout ."
     for (const arg of rest) {
-      if (dangerousFlags.has(arg)) return false
+      if (dangerousFlags.has(arg)) {
+        return unsafe(`git: ${subcommand} ${arg}`, describeDestructiveFlag(subcommand, arg))
+      }
     }
   }
 
@@ -192,16 +213,40 @@ export function isGitCommandSafe(argsOrCommand: string[] | string, customProtect
     const branches = customProtectedBranches ?? PROTECTED_BRANCHES
     for (const arg of rest) {
       const target = arg.includes(":") ? arg.split(":").pop()! : arg
-      if (branches.has(target)) return false
+      if (branches.has(target)) {
+        return unsafe(`git: ${subcommand} to protected branch ${target}`, `git ${subcommand} to protected branch "${target}"`)
+      }
     }
-    return true
+    return safe
   }
 
   // Known safe subcommands
-  if (SAFE_SUBCOMMANDS.has(subcommand)) return true
+  if (SAFE_SUBCOMMANDS.has(subcommand)) return safe
 
   // Unknown subcommand — prompt
-  return false
+  return unsafe(`git: unknown subcommand ${subcommand}`, `Unknown git subcommand "${subcommand}"`)
+}
+
+/** Human-friendly description for a destructive flag on a git subcommand. */
+function describeDestructiveFlag(subcommand: string, flag: string): string {
+  const key = `${subcommand} ${flag}`
+  const descriptions: Record<string, string> = {
+    "reset --hard": "git reset --hard discards all uncommitted changes",
+    "checkout .": "git checkout . discards all unstaged changes",
+    "restore .": "git restore . discards all unstaged changes",
+    "clean -f": "git clean permanently deletes untracked files",
+    "clean -fd": "git clean permanently deletes untracked files and directories",
+    "clean -fx": "git clean permanently deletes untracked and ignored files",
+    "clean -fxd": "git clean permanently deletes untracked, ignored files and directories",
+    "clean -fdx": "git clean permanently deletes untracked, ignored files and directories",
+    "clean -ff": "git clean permanently deletes untracked files (force)",
+    "branch -D": "Force-deletes a branch regardless of merge status",
+    "branch -d": "Deletes a branch",
+    "branch --force": "Force-overwrites a branch",
+    "stash drop": "git stash drop permanently removes stashed changes",
+    "stash clear": "git stash clear permanently removes all stashed changes",
+  }
+  return descriptions[key] ?? `git ${subcommand} with ${flag} is destructive`
 }
 
 /**

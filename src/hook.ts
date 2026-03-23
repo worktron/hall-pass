@@ -47,13 +47,14 @@ function feedback(suggestion: string): never {
   process.exit(0)
 }
 
-/** Prompt the user for permission (no additional context for Claude). */
-function prompt(reason: string): never {
+/** Prompt the user for permission with a human-friendly message. */
+function prompt(reason: string, message: string): never {
   diag(`PROMPT ${reason}`)
   const output = JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "ask",
+      permissionDecisionReason: message,
     },
   })
   process.stdout.write(output)
@@ -110,7 +111,7 @@ if (toolName === "Write" || toolName === "Edit") {
 
   if (!decision.allowed) {
     audit.log({ tool: toolName, input: filePath, decision: "prompt", reason: decision.reason, layer: "paths" })
-    prompt(`path-blocked: ${decision.reason}`)
+    prompt(`path-blocked: ${decision.reason}`, `File path ${decision.reason}`)
   }
 
   audit.log({ tool: toolName, input: filePath, decision: "allow", reason: "no path match", layer: "paths" })
@@ -121,7 +122,7 @@ if (toolName === "Write" || toolName === "Edit") {
 
 if (!command) {
   debug("bash", "empty command")
-  prompt("empty command")
+  prompt("empty command", "Empty command")
 }
 
 debug("bash", { command })
@@ -139,7 +140,7 @@ await proc.exited
 
 if (proc.exitCode !== 0) {
   debug("shfmt", "parse failed")
-  prompt("shfmt failed")
+  prompt("shfmt failed", "Could not parse command")
 }
 
 let ast: unknown
@@ -147,7 +148,7 @@ try {
   ast = JSON.parse(stdout)
 } catch {
   debug("shfmt", "JSON parse failed")
-  prompt("shfmt json failed")
+  prompt("shfmt json failed", "Could not parse command")
 }
 
 // -- Extract commands and AST-level data --
@@ -167,7 +168,7 @@ for (const redir of redirects) {
   if (!decision.allowed) {
     debug("redirect-block", { path: redir.path, op, reason: decision.reason })
     audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `redirect ${decision.reason}`, layer: "paths" })
-    prompt(`redirect-blocked: ${decision.reason}`)
+    prompt(`redirect-blocked: ${decision.reason}`, `Redirect targets ${decision.reason}`)
   }
 }
 
@@ -202,7 +203,7 @@ for (const cmdInfo of commandInfos) {
 
   if (result.decision === "prompt") {
     audit.log({ tool: "Bash", input: command, decision: "prompt", reason: result.reason, layer: "evaluate" })
-    prompt(result.reason)
+    prompt(result.reason, result.message)
   }
 
   if (result.decision === "pass") {

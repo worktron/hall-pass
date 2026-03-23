@@ -9,20 +9,20 @@
 import type { CommandInfo } from "./parser.ts"
 import { extractCommandInfos } from "./parser.ts"
 import type { EvalResult, EvalContext } from "./evaluate.ts"
-import { isGitCommandSafe } from "./git.ts"
+import { checkGitCommand } from "./git.ts"
 import { DANGEROUS_ENV_VARS } from "./safelist.ts"
 
 export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 
 const allow = (reason: string): EvalResult => ({ decision: "allow", reason })
-const prompt = (reason: string): EvalResult => ({ decision: "prompt", reason })
+const prompt = (reason: string, message: string): EvalResult => ({ decision: "prompt", reason, message })
 
 export const INSPECTORS: Record<string, Inspector> = {
   // -- Version control --
 
   git: (cmdInfo, ctx) => {
-    const safe = isGitCommandSafe(cmdInfo.args, ctx.protectedBranches)
-    return safe ? allow("git: safe") : prompt("git: unsafe")
+    const decision = checkGitCommand(cmdInfo.args, ctx.protectedBranches)
+    return decision.safe ? allow("git: safe") : prompt(decision.reason, decision.message)
   },
 
   // -- Commands that proxy other commands --
@@ -50,7 +50,7 @@ export const INSPECTORS: Record<string, Inspector> = {
 
   source: () => {
     // source/. executes arbitrary scripts — always prompt
-    return prompt("source: executes arbitrary scripts")
+    return prompt("source: executes arbitrary scripts", `"source" executes an external script`)
   },
 
   sh: (cmdInfo, ctx) => shellInspector(cmdInfo, ctx),
@@ -74,7 +74,7 @@ export const INSPECTORS: Record<string, Inspector> = {
       if (arg.includes("=")) {
         const varName = arg.split("=")[0]
         if (DANGEROUS_ENV_VARS.has(varName)) {
-          return prompt(`env: dangerous var ${varName}`)
+          return prompt(`env: dangerous var ${varName}`, `Sets dangerous variable "${varName}"`)
         }
         continue
       }
@@ -112,14 +112,14 @@ export const INSPECTORS: Record<string, Inspector> = {
 
   perl: (cmdInfo) => {
     for (const arg of cmdInfo.args) {
-      if (arg === "-e" || arg === "-E") return prompt("perl: inline code")
+      if (arg === "-e" || arg === "-E") return prompt("perl: inline code", "Perl -e runs arbitrary inline code")
     }
     return allow("perl: script runner")
   },
 
   ruby: (cmdInfo) => {
     for (const arg of cmdInfo.args) {
-      if (arg === "-e") return prompt("ruby: inline code")
+      if (arg === "-e") return prompt("ruby: inline code", "Ruby -e runs arbitrary inline code")
     }
     return allow("ruby: script runner")
   },
@@ -132,7 +132,8 @@ export const INSPECTORS: Record<string, Inspector> = {
       const arg = args[i]
 
       // -delete and -ok always prompt (no sub-command to inspect)
-      if (arg === "-delete" || arg === "-ok") return prompt(`find: ${arg}`)
+      if (arg === "-delete") return prompt("find: -delete", `"find -delete" permanently removes matched files`)
+      if (arg === "-ok") return prompt("find: -ok", `"find -ok" executes a command on matched files`)
 
       if (arg === "-exec" || arg === "-execdir") {
         // Extract sub-command: everything from next arg up to ; or +
@@ -144,7 +145,7 @@ export const INSPECTORS: Record<string, Inspector> = {
           }
           subArgs.push(args[j])
         }
-        if (subArgs.length === 0) return prompt("find: empty -exec")
+        if (subArgs.length === 0) return prompt("find: empty -exec", `"find -exec" with no command specified`)
         const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
         const result = ctx.evaluate(subCmd)
         if (result.decision !== "allow") return result
@@ -156,7 +157,7 @@ export const INSPECTORS: Record<string, Inspector> = {
   sed: (cmdInfo) => {
     // sed is safe UNLESS it uses -i (in-place editing)
     for (const arg of cmdInfo.args) {
-      if (arg === "-i" || arg.startsWith("-i")) return prompt("sed: -i in-place")
+      if (arg === "-i" || arg.startsWith("-i")) return prompt("sed: -i in-place", `"sed -i" edits files in-place`)
     }
     return allow("sed: read-only")
   },
@@ -165,8 +166,8 @@ export const INSPECTORS: Record<string, Inspector> = {
     // awk is safe UNLESS the script contains system() or getline
     for (const arg of cmdInfo.args) {
       if (arg.startsWith("-")) continue
-      if (arg.includes("system(") || arg.includes("system (")) return prompt("awk: system()")
-      if (arg.includes("| getline") || arg.includes("|getline")) return prompt("awk: getline")
+      if (arg.includes("system(") || arg.includes("system (")) return prompt("awk: system()", "awk script calls system() to execute shell commands")
+      if (arg.includes("| getline") || arg.includes("|getline")) return prompt("awk: getline", "awk script uses getline which can execute commands")
     }
     return allow("awk: safe")
   },
@@ -183,7 +184,7 @@ export const INSPECTORS: Record<string, Inspector> = {
         signalSeen = true
         continue
       }
-      if (arg === "1" || arg === "-1") return prompt("kill: dangerous PID")
+      if (arg === "1" || arg === "-1") return prompt("kill: dangerous PID", "Sending signal to PID 1 affects critical system processes")
     }
     return allow("kill: safe")
   },
@@ -197,12 +198,12 @@ export const INSPECTORS: Record<string, Inspector> = {
         const mode = arg.length === 4 ? arg : "0" + arg
         const special = parseInt(mode[0])
         const other = parseInt(mode[3])
-        if (special > 0) return prompt("chmod: setuid/setgid/sticky")
-        if (other >= 6) return prompt("chmod: world-writable")
+        if (special > 0) return prompt("chmod: setuid/setgid/sticky", "Sets setuid/setgid bit which can escalate privileges")
+        if (other >= 6) return prompt("chmod: world-writable", "Makes file world-writable")
       }
-      if (/[+]s/.test(arg)) return prompt("chmod: setuid/setgid")
-      if (/[oa][+]w/.test(arg)) return prompt("chmod: world-writable")
-      if (arg === "777" || arg === "666") return prompt("chmod: unsafe mode")
+      if (/[+]s/.test(arg)) return prompt("chmod: setuid/setgid", "Sets setuid/setgid bit which can escalate privileges")
+      if (/[oa][+]w/.test(arg)) return prompt("chmod: world-writable", "Makes file world-writable")
+      if (arg === "777" || arg === "666") return prompt("chmod: unsafe mode", `chmod ${arg} makes file world-readable and writable`)
     }
     return allow("chmod: safe")
   },
@@ -222,13 +223,13 @@ export const INSPECTORS: Record<string, Inspector> = {
 
     if (subcmd === "run" || subcmd === "exec") {
       for (const arg of args) {
-        if (arg === "--privileged") return prompt("docker: --privileged")
+        if (arg === "--privileged") return prompt("docker: --privileged", "Docker --privileged gives full host access")
         if (arg === "--pid=host" || arg === "--net=host" || arg === "--network=host") {
-          return prompt("docker: host namespace")
+          return prompt("docker: host namespace", "Docker with host namespace shares host's process/network space")
         }
         if (arg.startsWith("-v") || arg.startsWith("--volume")) {
           const vol = arg.includes("=") ? arg.split("=")[1] : args[args.indexOf(arg) + 1]
-          if (vol && vol.startsWith("/:/")) return prompt("docker: root volume mount")
+          if (vol && vol.startsWith("/:/")) return prompt("docker: root volume mount", "Docker mounts root filesystem into container")
         }
       }
       return allow(`docker: ${subcmd}`)
@@ -238,13 +239,13 @@ export const INSPECTORS: Record<string, Inspector> = {
       return allow(`docker: ${subcmd}`)
     }
 
-    return prompt(`docker: unknown subcommand ${subcmd}`)
+    return prompt(`docker: unknown subcommand ${subcmd}`, `Unknown docker subcommand "${subcmd}"`)
   },
 
   node: (cmdInfo) => {
     for (const arg of cmdInfo.args) {
       if (arg === "-e" || arg === "--eval" || arg === "-p" || arg === "--print") {
-        return prompt("node: inline code")
+        return prompt("node: inline code", "Node -e/--eval runs arbitrary inline code")
       }
     }
     return allow("node: script runner")
@@ -252,14 +253,14 @@ export const INSPECTORS: Record<string, Inspector> = {
 
   python: (cmdInfo) => {
     for (const arg of cmdInfo.args) {
-      if (arg === "-c") return prompt("python: inline code")
+      if (arg === "-c") return prompt("python: inline code", "Python -c runs arbitrary inline code")
     }
     return allow("python: script runner")
   },
 
   python3: (cmdInfo) => {
     for (const arg of cmdInfo.args) {
-      if (arg === "-c") return prompt("python3: inline code")
+      if (arg === "-c") return prompt("python3: inline code", "Python -c runs arbitrary inline code")
     }
     return allow("python3: script runner")
   },
@@ -289,11 +290,11 @@ export const INSPECTORS: Record<string, Inspector> = {
   // -- Remote access & scripting --
 
   ssh: () => {
-    return prompt("ssh: remote access")
+    return prompt("ssh: remote access", "SSH opens a remote shell session")
   },
 
   osascript: () => {
-    return prompt("osascript: AppleScript execution")
+    return prompt("osascript: AppleScript execution", "osascript can execute system-level AppleScript commands")
   },
 
   // -- Commands with safe/unsafe subcommands --
@@ -304,7 +305,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     const subcmd = args[1]
     const readCmds = new Set(["read", "read-type", "find", "domains", "export"])
     if (readCmds.has(subcmd)) return allow(`defaults: ${subcmd}`)
-    return prompt(`defaults: ${subcmd}`)
+    return prompt(`defaults: ${subcmd}`, `"defaults ${subcmd}" modifies macOS system preferences`)
   },
 
   launchctl: (cmdInfo) => {
@@ -313,7 +314,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     const subcmd = args[1]
     const safeCmds = new Set(["list", "print", "blame", "dumpstate", "dumpjpcategory"])
     if (safeCmds.has(subcmd)) return allow(`launchctl: ${subcmd}`)
-    return prompt(`launchctl: ${subcmd}`)
+    return prompt(`launchctl: ${subcmd}`, `"launchctl ${subcmd}" modifies system services`)
   },
 
   networksetup: (cmdInfo) => {
@@ -322,7 +323,7 @@ export const INSPECTORS: Record<string, Inspector> = {
       if (arg.startsWith("-set") || arg.startsWith("-create") ||
           arg.startsWith("-remove") || arg.startsWith("-add") ||
           arg === "-ordernetworkservices" || arg === "-switchtodefault") {
-        return prompt("networksetup: modifies network config")
+        return prompt("networksetup: modifies network config", "networksetup modifies system network configuration")
       }
     }
     return allow("networksetup: read-only query")
@@ -357,10 +358,10 @@ export const INSPECTORS: Record<string, Inspector> = {
       if (READ_ONLY_CMDS.has(arg.toLowerCase())) {
         return allow(`redis-cli: ${arg.toLowerCase()}`)
       }
-      return prompt(`redis-cli: ${arg.toLowerCase()}`)
+      return prompt(`redis-cli: ${arg.toLowerCase()}`, `redis-cli "${arg.toLowerCase()}" can modify data`)
     }
     // No command = interactive mode
-    return prompt("redis-cli: interactive session")
+    return prompt("redis-cli: interactive session", "Interactive redis-cli session has unrestricted access")
   },
 }
 
@@ -384,11 +385,11 @@ function shellInspector(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
 
   // No -c flag — running a script file, always prompt
   if (script === undefined) {
-    return prompt(`${shell}: script execution`)
+    return prompt(`${shell}: script execution`, `Running "${shell}" with a script file`)
   }
 
   if (!script) {
-    return prompt(`${shell}: -c with empty script`)
+    return prompt(`${shell}: -c with empty script`, `"${shell} -c" with empty script`)
   }
 
   // Parse the inline script with shfmt
@@ -397,14 +398,14 @@ function shellInspector(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
   })
 
   if (proc.exitCode !== 0) {
-    return prompt(`${shell}: -c script parse failed`)
+    return prompt(`${shell}: -c script parse failed`, `Could not parse inline "${shell} -c" script`)
   }
 
   let ast: unknown
   try {
     ast = JSON.parse(proc.stdout.toString())
   } catch {
-    return prompt(`${shell}: -c script JSON parse failed`)
+    return prompt(`${shell}: -c script JSON parse failed`, `Could not parse inline "${shell} -c" script`)
   }
 
   // Extract and evaluate all commands in the inline script
