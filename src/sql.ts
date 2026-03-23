@@ -51,7 +51,7 @@ export function extractSqlFromArgs(clientName: string, args: string[]): string |
     // Walk args, skip flags and their values, find positional args
     const positional: string[] = []
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       if (arg === "-cmd" || arg === "-separator" || arg === "-newline") {
         i++ // skip value
       } else if (arg.startsWith("-")) {
@@ -61,13 +61,13 @@ export function extractSqlFromArgs(clientName: string, args: string[]): string |
       }
     }
     // First positional = db file, second = SQL
-    return positional.length >= 2 ? positional[1] : null
+    return positional.length >= 2 ? positional[1]! : null
   }
 
   // psql/mysql: look for -c/-e/--command/--execute followed by SQL
   if (flags) {
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       // Handle --flag=value form
       for (const flag of flags) {
         if (arg.startsWith(flag + "=")) {
@@ -76,7 +76,7 @@ export function extractSqlFromArgs(clientName: string, args: string[]): string |
       }
       // Handle --flag value form
       if (flags.has(arg) && i + 1 < args.length) {
-        return args[i + 1]
+        return args[i + 1]!
       }
     }
   }
@@ -98,7 +98,7 @@ export function extractSqlFromPsql(command: string): string | null {
 
   for (const pattern of patterns) {
     const match = command.match(pattern)
-    if (match) return match[1]
+    if (match) return match[1]!
   }
 
   return null

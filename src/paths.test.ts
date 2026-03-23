@@ -120,21 +120,21 @@ describe("checkFilePath", () => {
 describe("checkCommandPaths", () => {
   test("non-path arguments are skipped", () => {
     const config = makeConfig({ protected: ["**/.env"] })
-    const cmd: CommandInfo = { name: "echo", args: ["echo", "hello", "world"] }
+    const cmd: CommandInfo = { assigns: [], name: "echo", args: ["echo", "hello", "world"] }
 
     expect(checkCommandPaths(cmd, config).allowed).toBe(true)
   })
 
   test("flags are skipped", () => {
     const config = makeConfig({ protected: ["**/.env"] })
-    const cmd: CommandInfo = { name: "cat", args: ["cat", "-n", "--number", "/safe/file.txt"] }
+    const cmd: CommandInfo = { assigns: [], name: "cat", args: ["cat", "-n", "--number", "/safe/file.txt"] }
 
     expect(checkCommandPaths(cmd, config).allowed).toBe(true)
   })
 
   test("read commands get read operation type", () => {
     const config = makeConfig({ read_only: ["**/config/prod/**"] })
-    const cmd: CommandInfo = { name: "cat", args: ["cat", "/project/config/prod/db.yml"] }
+    const cmd: CommandInfo = { assigns: [], name: "cat", args: ["cat", "/project/config/prod/db.yml"] }
 
     // cat is a read command, read-only allows read
     expect(checkCommandPaths(cmd, config).allowed).toBe(true)
@@ -142,7 +142,7 @@ describe("checkCommandPaths", () => {
 
   test("write commands get write operation type", () => {
     const config = makeConfig({ read_only: ["**/config/prod/**"] })
-    const cmd: CommandInfo = { name: "cp", args: ["cp", "/tmp/new.yml", "/project/config/prod/db.yml"] }
+    const cmd: CommandInfo = { assigns: [], name: "cp", args: ["cp", "/tmp/new.yml", "/project/config/prod/db.yml"] }
 
     // cp is a write command, read-only blocks write
     expect(checkCommandPaths(cmd, config).allowed).toBe(false)
@@ -150,28 +150,28 @@ describe("checkCommandPaths", () => {
 
   test("delete commands get delete operation type", () => {
     const config = makeConfig({ no_delete: ["**/migrations/**"] })
-    const cmd: CommandInfo = { name: "rm", args: ["rm", "/project/migrations/001.sql"] }
+    const cmd: CommandInfo = { assigns: [], name: "rm", args: ["rm", "/project/migrations/001.sql"] }
 
     expect(checkCommandPaths(cmd, config).allowed).toBe(false)
   })
 
   test("protected paths block even read commands", () => {
     const config = makeConfig({ protected: ["**/.env"] })
-    const cmd: CommandInfo = { name: "cat", args: ["cat", "/project/.env"] }
+    const cmd: CommandInfo = { assigns: [], name: "cat", args: ["cat", "/project/.env"] }
 
     expect(checkCommandPaths(cmd, config).allowed).toBe(false)
   })
 
   test("path-like arguments with / are checked", () => {
     const config = makeConfig({ protected: ["**/.env"] })
-    const cmd: CommandInfo = { name: "cp", args: ["cp", "/project/.env", "/tmp/backup"] }
+    const cmd: CommandInfo = { assigns: [], name: "cp", args: ["cp", "/project/.env", "/tmp/backup"] }
 
     expect(checkCommandPaths(cmd, config).allowed).toBe(false)
   })
 
   test("path-like arguments with . prefix are checked", () => {
     const config = makeConfig({ protected: ["**/.env"] })
-    const cmd: CommandInfo = { name: "cp", args: ["cp", "./.env", "/tmp/backup"] }
+    const cmd: CommandInfo = { assigns: [], name: "cp", args: ["cp", "./.env", "/tmp/backup"] }
 
     expect(checkCommandPaths(cmd, config).allowed).toBe(false)
   })

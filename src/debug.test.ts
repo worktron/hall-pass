@@ -60,7 +60,7 @@ describe("debug", () => {
     const match = output.match(/\[hall-pass\] (.+?): (.+)\n/)
     expect(match).not.toBeNull()
     expect(match![1]).toBe("parse-test")
-    const parsed = JSON.parse(match![2])
+    const parsed = JSON.parse(match![2]!)
     expect(parsed).toEqual({ num: 42, str: "hello" })
   })
 
@@ -77,7 +77,7 @@ describe("debug", () => {
     const output = stderrSpy.mock.calls[0][0] as string
     expect(output).toContain("[hall-pass] multi:")
     const match = output.match(/: (.+)\n/)
-    const parsed = JSON.parse(match![1])
+    const parsed = JSON.parse(match![1]!)
     expect(parsed).toEqual(["a", "b", "c"])
   })
 })

@@ -98,7 +98,7 @@ function parseGitCommand(args: string[]): { subcommand: string; flags: string[];
   // Skip git-level flags before the subcommand
   // These are flags that go between "git" and the subcommand
   while (remaining.length > 0) {
-    const arg = remaining[0]
+    const arg = remaining[0]!
     if (arg === "-C" || arg === "--git-dir" || arg === "--work-tree") {
       remaining.shift() // the flag
       remaining.shift() // its value
@@ -151,7 +151,7 @@ export function checkGitCommand(argsOrCommand: string[] | string, customProtecte
 
   // Check for dangerous -c config values (e.g., git -c core.fsmonitor="evil" status)
   for (const config of configs) {
-    const key = config.split("=")[0].toLowerCase()
+    const key = config.split("=")[0]!.toLowerCase()
     for (const dangerous of DANGEROUS_GIT_CONFIGS) {
       if (key.startsWith(dangerous.toLowerCase())) {
         return unsafe(`git: dangerous -c config ${key}`, `git -c sets executable config key "${key}"`)
@@ -178,7 +178,7 @@ export function checkGitCommand(argsOrCommand: string[] | string, customProtecte
     // git config key (no value) = read, git config key value = write
     // If there are 2+ positional args, it's a write — check if the key is dangerous
     if (rest.length >= 2) {
-      const key = rest[0].toLowerCase()
+      const key = rest[0]!.toLowerCase()
       for (const dangerous of DANGEROUS_GIT_CONFIGS) {
         if (key.startsWith(dangerous.toLowerCase())) {
           return unsafe(`git: dangerous config write ${key}`, `git config sets executable key "${key}"`)

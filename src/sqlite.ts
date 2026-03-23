@@ -74,7 +74,7 @@ export function isSqliteDotCommandSafe(input: string): boolean {
   const match = rest.match(/^([a-zA-Z0-9_]+)/)
   if (!match) return false
 
-  return SAFE_SQLITE_DOT_COMMANDS.has(match[1].toLowerCase())
+  return SAFE_SQLITE_DOT_COMMANDS.has(match[1]!.toLowerCase())
 }
 
 /**

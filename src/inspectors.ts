@@ -31,7 +31,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     const args = cmdInfo.args
     // xargs [flags] command [initial-args...]
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       // Skip xargs flags and their values
       if (arg === "-I" || arg === "-L" || arg === "-n" || arg === "-P" ||
           arg === "-d" || arg === "-s" || arg === "-a" || arg === "-R") {
@@ -41,7 +41,7 @@ export const INSPECTORS: Record<string, Inspector> = {
       if (arg.startsWith("-")) continue
       // Everything from here is the sub-command + its args
       const subArgs = args.slice(i)
-      const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
+      const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
       return ctx.evaluate(subCmd)
     }
     // No command specified — xargs defaults to echo, which is safe
@@ -63,7 +63,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     if (args.length === 1) return allow("env: prints environment")
 
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       // Skip flags
       if (arg === "-i" || arg === "--ignore-environment" || arg === "-0" || arg === "--null") continue
       if (arg === "-u" || arg === "--unset") { i++; continue }
@@ -72,7 +72,7 @@ export const INSPECTORS: Record<string, Inspector> = {
 
       // VAR=val assignment — check for dangerous vars
       if (arg.includes("=")) {
-        const varName = arg.split("=")[0]
+        const varName = arg.split("=")[0]!
         if (DANGEROUS_ENV_VARS.has(varName)) {
           return prompt(`env: dangerous var ${varName}`, `Sets dangerous variable "${varName}"`)
         }
@@ -81,7 +81,7 @@ export const INSPECTORS: Record<string, Inspector> = {
 
       // First non-flag, non-assignment arg is the command
       const subArgs = args.slice(i)
-      const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
+      const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
       return ctx.evaluate(subCmd)
     }
 
@@ -93,7 +93,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     if (args.length === 1) return allow("command: no args")
 
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       // command -v / -V just prints command info (like which)
       if (arg === "-v" || arg === "-V") return allow("command: lookup")
       if (arg === "-p") continue // use default PATH
@@ -101,7 +101,7 @@ export const INSPECTORS: Record<string, Inspector> = {
 
       // First non-flag arg is the command to run
       const subArgs = args.slice(i)
-      const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
+      const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
       return ctx.evaluate(subCmd)
     }
 
@@ -129,7 +129,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     const args = cmdInfo.args
     // find is safe UNLESS it uses -exec, -execdir, -delete, or -ok
     for (let i = 0; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
 
       // -delete and -ok always prompt (no sub-command to inspect)
       if (arg === "-delete") return prompt("find: -delete", `"find -delete" permanently removes matched files`)
@@ -143,10 +143,10 @@ export const INSPECTORS: Record<string, Inspector> = {
             i = j // skip past terminator
             break
           }
-          subArgs.push(args[j])
+          subArgs.push(args[j]!)
         }
         if (subArgs.length === 0) return prompt("find: empty -exec", `"find -exec" with no command specified`)
-        const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
+        const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
         const result = ctx.evaluate(subCmd)
         if (result.decision !== "allow") return result
       }
@@ -177,7 +177,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     // kill [-signal] pid...
     let signalSeen = false
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       if (arg === "-s") { i++; signalSeen = true; continue }
       if (arg === "-l" || arg === "--list") continue
       if (!signalSeen && (/^-\d+$/.test(arg) || /^-[A-Z]+$/.test(arg))) {
@@ -192,12 +192,12 @@ export const INSPECTORS: Record<string, Inspector> = {
   chmod: (cmdInfo) => {
     const args = cmdInfo.args
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       if (arg.startsWith("-")) continue
       if (/^\d{3,4}$/.test(arg)) {
         const mode = arg.length === 4 ? arg : "0" + arg
-        const special = parseInt(mode[0])
-        const other = parseInt(mode[3])
+        const special = parseInt(mode[0]!)
+        const other = parseInt(mode[3]!)
         if (special > 0) return prompt("chmod: setuid/setgid/sticky", "Sets setuid/setgid bit which can escalate privileges")
         if (other >= 6) return prompt("chmod: world-writable", "Makes file world-writable")
       }
@@ -211,7 +211,7 @@ export const INSPECTORS: Record<string, Inspector> = {
   docker: (cmdInfo) => {
     const args = cmdInfo.args
     if (args.length < 2) return allow("docker: no subcommand")
-    const subcmd = args[1]
+    const subcmd = args[1]!
 
     const safeSubcmds = new Set([
       "ps", "images", "logs", "inspect", "stats", "top",
@@ -271,7 +271,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     const args = cmdInfo.args
     // xcrun [options] tool [args...]
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       if (arg === "--sdk" || arg === "--toolchain") { i++; continue }
       if (arg === "--find" || arg === "--show-sdk-path" || arg === "--show-sdk-version" ||
           arg === "--show-sdk-platform-path" || arg === "--show-sdk-platform-version") {
@@ -281,7 +281,7 @@ export const INSPECTORS: Record<string, Inspector> = {
       if (arg.startsWith("-")) continue
       // First non-flag arg is the tool to run
       const subArgs = args.slice(i)
-      const subCmd: CommandInfo = { name: subArgs[0], args: subArgs, assigns: [] }
+      const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
       return ctx.evaluate(subCmd)
     }
     return allow("xcrun: no tool specified")
@@ -302,7 +302,7 @@ export const INSPECTORS: Record<string, Inspector> = {
   defaults: (cmdInfo) => {
     const args = cmdInfo.args
     if (args.length < 2) return allow("defaults: no subcommand")
-    const subcmd = args[1]
+    const subcmd = args[1]!
     const readCmds = new Set(["read", "read-type", "find", "domains", "export"])
     if (readCmds.has(subcmd)) return allow(`defaults: ${subcmd}`)
     return prompt(`defaults: ${subcmd}`, `"defaults ${subcmd}" modifies macOS system preferences`)
@@ -311,7 +311,7 @@ export const INSPECTORS: Record<string, Inspector> = {
   launchctl: (cmdInfo) => {
     const args = cmdInfo.args
     if (args.length < 2) return allow("launchctl: no subcommand")
-    const subcmd = args[1]
+    const subcmd = args[1]!
     const safeCmds = new Set(["list", "print", "blame", "dumpstate", "dumpjpcategory"])
     if (safeCmds.has(subcmd)) return allow(`launchctl: ${subcmd}`)
     return prompt(`launchctl: ${subcmd}`, `"launchctl ${subcmd}" modifies system services`)
@@ -345,7 +345,7 @@ export const INSPECTORS: Record<string, Inspector> = {
       "pubsub", "client",
     ])
     for (let i = 1; i < args.length; i++) {
-      const arg = args[i]
+      const arg = args[i]!
       // Skip redis-cli flags and their values
       if (arg === "-h" || arg === "-p" || arg === "-a" || arg === "-n" ||
           arg === "-u" || arg === "--user" || arg === "--pass" ||

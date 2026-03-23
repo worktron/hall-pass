@@ -49,7 +49,7 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
   if (n.Type === "CallExpr" && Array.isArray(n.Args) && n.Args.length > 0) {
     const args = (n.Args as Array<Record<string, unknown>>).map(extractWordValue).filter(Boolean) as string[]
     if (args.length > 0) {
-      const name = args[0].split("/").pop()!
+      const name = args[0]!.split("/").pop()!
       commands.push({
         name,
         args: [name, ...args.slice(1)],

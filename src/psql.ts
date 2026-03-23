@@ -103,7 +103,7 @@ export function isPsqlMetaCommandSafe(input: string): boolean {
   const match = rest.match(/^([a-zA-Z]+)/)
   if (!match) return false
 
-  const cmd = match[1]
+  const cmd = match[1]!
 
   // Check with and without trailing + (verbose flag)
   if (SAFE_PSQL_META_COMMANDS.has(cmd)) return true

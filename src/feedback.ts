@@ -40,7 +40,7 @@ function getPythonInlineCode(cmd: CommandInfo): string | null {
   if (cmd.name !== "python3" && cmd.name !== "python") return null
   const cIdx = cmd.args.indexOf("-c")
   if (cIdx === -1 || cIdx + 1 >= cmd.args.length) return null
-  return cmd.args[cIdx + 1]
+  return cmd.args[cIdx + 1] ?? null
 }
 
 /**
@@ -52,7 +52,7 @@ function getNodeInlineCode(cmd: CommandInfo): string | null {
   for (let i = 0; i < cmd.args.length; i++) {
     const arg = cmd.args[i]
     if ((arg === "-e" || arg === "--eval" || arg === "-p" || arg === "--print") && i + 1 < cmd.args.length) {
-      return cmd.args[i + 1]
+      return cmd.args[i + 1] ?? null
     }
   }
   return null

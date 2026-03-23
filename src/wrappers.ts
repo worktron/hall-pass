@@ -81,7 +81,7 @@ export function unwrapCommand(cmdInfo: CommandInfo): CommandInfo {
   const innerArgs = rest.slice(innerStart)
   if (innerArgs.length === 0) return cmdInfo
 
-  const innerName = innerArgs[0]
+  const innerName = innerArgs[0]!
   const innerCmd: CommandInfo = {
     name: innerName,
     args: innerArgs,
