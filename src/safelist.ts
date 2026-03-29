@@ -135,4 +135,8 @@ export const DANGEROUS_ENV_VARS = new Set([
   "BASH_ENV",
   "ENV",                     // sh equivalent of BASH_ENV
   "PROMPT_COMMAND",
+  // Hijacking attack vectors
+  "IFS",                     // field separator injection
+  "SHELL",                   // shell override
+  "HOME",                    // home directory override
 ])

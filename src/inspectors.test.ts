@@ -67,6 +67,50 @@ describe("evaluateBashCommand", () => {
     })
   })
 
+  describe("eval", () => {
+    test("eval echo hello → allow", () => {
+      expectAllow(cmd("eval", "echo", "hello"))
+    })
+
+    test("eval rm -rf / → prompt", () => {
+      expectPrompt(cmd("eval", "rm", "-rf", "/"))
+    })
+
+    test("eval ls → allow", () => {
+      expectAllow(cmd("eval", "ls"))
+    })
+
+    test("bare eval → allow", () => {
+      expectAllow(cmd("eval"))
+    })
+  })
+
+  describe("exec", () => {
+    test("exec echo hello → allow", () => {
+      expectAllow(cmd("exec", "echo", "hello"))
+    })
+
+    test("exec rm -rf / → prompt", () => {
+      expectPrompt(cmd("exec", "rm", "-rf", "/"))
+    })
+
+    test("exec ls → allow", () => {
+      expectAllow(cmd("exec", "ls"))
+    })
+
+    test("exec -l bash → prompt (shell execution)", () => {
+      expectPrompt(cmd("exec", "-l", "bash"))
+    })
+
+    test("exec -a myname ls → allow", () => {
+      expectAllow(cmd("exec", "-a", "myname", "ls"))
+    })
+
+    test("bare exec → allow", () => {
+      expectAllow(cmd("exec"))
+    })
+  })
+
   describe("find", () => {
     test("find . -name '*.ts' → allow", () => {
       expectAllow(cmd("find", ".", "-name", "*.ts"))
@@ -150,6 +194,14 @@ describe("evaluateBashCommand", () => {
 
     test("awk with system () (space) → prompt", () => {
       expectPrompt(cmd("awk", "{system (\"evil\")}"))
+    })
+
+    test("awk with | getline → prompt", () => {
+      expectPrompt(cmd("awk", "{ \"ls\" | getline result }"))
+    })
+
+    test("awk with |getline (no space) → prompt", () => {
+      expectPrompt(cmd("awk", "{ \"ls\" |getline result }"))
     })
   })
 
@@ -531,6 +583,60 @@ describe("evaluateBashCommand", () => {
 
     test("bare launchctl → allow", () => {
       expectAllow(cmd("launchctl"))
+    })
+  })
+
+  describe("security", () => {
+    test("security list-keychains → allow", () => {
+      expectAllow(cmd("security", "list-keychains"))
+    })
+
+    test("security default-keychain → allow", () => {
+      expectAllow(cmd("security", "default-keychain"))
+    })
+
+    test("security find-certificate -a → allow", () => {
+      expectAllow(cmd("security", "find-certificate", "-a"))
+    })
+
+    test("security verify-cert -c cert.pem → allow", () => {
+      expectAllow(cmd("security", "verify-cert", "-c", "cert.pem"))
+    })
+
+    test("security show-keychain-info login.keychain → allow", () => {
+      expectAllow(cmd("security", "show-keychain-info", "login.keychain"))
+    })
+
+    test("security error -42 → allow", () => {
+      expectAllow(cmd("security", "error", "-42"))
+    })
+
+    test("security find-internet-password -s example.com → prompt", () => {
+      expectPrompt(cmd("security", "find-internet-password", "-s", "example.com"))
+    })
+
+    test("security find-generic-password -s myservice → prompt", () => {
+      expectPrompt(cmd("security", "find-generic-password", "-s", "myservice"))
+    })
+
+    test("security dump-keychain → prompt", () => {
+      expectPrompt(cmd("security", "dump-keychain"))
+    })
+
+    test("security add-internet-password → prompt", () => {
+      expectPrompt(cmd("security", "add-internet-password", "-s", "example.com", "-a", "user"))
+    })
+
+    test("security delete-keychain → prompt", () => {
+      expectPrompt(cmd("security", "delete-keychain", "test.keychain"))
+    })
+
+    test("security unlock-keychain → prompt", () => {
+      expectPrompt(cmd("security", "unlock-keychain"))
+    })
+
+    test("bare security → allow", () => {
+      expectAllow(cmd("security"))
     })
   })
 
