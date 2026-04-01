@@ -17,7 +17,7 @@ export const SAFE_COMMANDS = new Set([
   "cargo", "go", "make", "cmake",
   "java", "javac", "mvn", "gradle",
   "dotnet",
-  "swift", "swiftc", "rustc",
+  "swift", "swiftc", "rustc", "cc", "gcc",
   "xcodebuild",
 
   // ── Package managers ─────────────────────────────────────────────────
@@ -32,6 +32,7 @@ export const SAFE_COMMANDS = new Set([
   // ── Network & DNS ────────────────────────────────────────────────────
   "curl", "wget", "ping",
   "dig", "nslookup", "dns-sd",
+  "ipconfig",
 
   // ── Text processing ──────────────────────────────────────────────────
   "grep", "egrep", "fgrep", "rg", "sort", "uniq",

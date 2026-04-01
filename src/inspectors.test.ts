@@ -670,6 +670,72 @@ describe("evaluateBashCommand", () => {
     })
   })
 
+  describe("railway", () => {
+    test("railway whoami → allow", () => {
+      expectAllow(cmd("railway", "whoami"))
+    })
+
+    test("railway status → allow", () => {
+      expectAllow(cmd("railway", "status"))
+    })
+
+    test("railway logs → allow", () => {
+      expectAllow(cmd("railway", "logs"))
+    })
+
+    test("railway variables → allow", () => {
+      expectAllow(cmd("railway", "variables"))
+    })
+
+    test("railway init → allow", () => {
+      expectAllow(cmd("railway", "init"))
+    })
+
+    test("railway link → allow", () => {
+      expectAllow(cmd("railway", "link"))
+    })
+
+    test("railway service → allow", () => {
+      expectAllow(cmd("railway", "service"))
+    })
+
+    test("railway --json status → allow (flags before subcommand)", () => {
+      expectAllow(cmd("railway", "--json", "status"))
+    })
+
+    test("railway -e production status → allow", () => {
+      expectAllow(cmd("railway", "-e", "production", "status"))
+    })
+
+    test("railway run bun start → allow (safe inner command)", () => {
+      expectAllow(cmd("railway", "run", "bun", "start"))
+    })
+
+    test("railway run rm -rf / → prompt (dangerous inner command)", () => {
+      expectPrompt(cmd("railway", "run", "rm", "-rf", "/"))
+    })
+
+    test("railway run → prompt (no inner command)", () => {
+      expectPrompt(cmd("railway", "run"))
+    })
+
+    test("railway up → prompt (deploys)", () => {
+      expectPrompt(cmd("railway", "up"))
+    })
+
+    test("railway down → prompt", () => {
+      expectPrompt(cmd("railway", "down"))
+    })
+
+    test("railway delete → prompt", () => {
+      expectPrompt(cmd("railway", "delete"))
+    })
+
+    test("bare railway → allow (no subcommand)", () => {
+      expectAllow(cmd("railway"))
+    })
+  })
+
   describe("redis-cli", () => {
     test("redis-cli ping → allow", () => {
       expectAllow(cmd("redis-cli", "ping"))

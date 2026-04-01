@@ -384,6 +384,44 @@ export const INSPECTORS: Record<string, Inspector> = {
     return prompt(`security: ${subcmd}`, `"security ${subcmd}" accesses or modifies Keychain data`)
   },
 
+  railway: (cmdInfo, ctx) => {
+    const args = cmdInfo.args
+    if (args.length < 2) return allow("railway: no subcommand")
+    // Skip flags like --json, -e, --environment before the subcommand
+    let subcmdIdx = 1
+    while (subcmdIdx < args.length) {
+      const arg = args[subcmdIdx]!
+      if (arg === "-e" || arg === "--environment" || arg === "--service" || arg === "--project") {
+        subcmdIdx += 2
+        continue
+      }
+      if (arg === "--json" || arg === "-j") { subcmdIdx++; continue }
+      if (arg.startsWith("-")) { subcmdIdx++; continue }
+      break
+    }
+    if (subcmdIdx >= args.length) return allow("railway: flags only")
+    const subcmd = args[subcmdIdx]!
+
+    const safeCmds = new Set([
+      "whoami", "status", "logs", "version",
+      "init", "link", "unlink", "service",
+      "variables", "environment", "domain", "volume",
+      "login", "logout", "docs", "shell", "open",
+      "list",
+    ])
+    if (safeCmds.has(subcmd)) return allow(`railway: ${subcmd}`)
+
+    // `railway run` proxies another command — evaluate the inner command
+    if (subcmd === "run") {
+      const innerArgs = args.slice(subcmdIdx + 1)
+      if (innerArgs.length === 0) return prompt("railway run: no command", "railway run with no command")
+      const subCmd: CommandInfo = { name: innerArgs[0]!, args: innerArgs, assigns: [] }
+      return ctx.evaluate(subCmd)
+    }
+
+    return prompt(`railway: ${subcmd}`, `"railway ${subcmd}" may modify deployment state`)
+  },
+
   "redis-cli": (cmdInfo) => {
     const args = cmdInfo.args
     // redis-cli [options] [command [args...]]

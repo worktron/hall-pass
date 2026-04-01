@@ -545,6 +545,42 @@ describe("new inspectors — integration", () => {
     })
   })
 
+  describe("railway — subcommand inspection", () => {
+    test("railway whoami → allow", async () => {
+      expectAllow(await runHook("railway whoami"))
+    })
+
+    test("railway status → allow", async () => {
+      expectAllow(await runHook("railway status"))
+    })
+
+    test("railway run bun start → allow", async () => {
+      expectAllow(await runHook("railway run bun start"))
+    })
+
+    test("railway run rm -rf / → prompt", async () => {
+      expectPrompt(await runHook("railway run rm -rf /"))
+    })
+
+    test("railway up → prompt", async () => {
+      expectPrompt(await runHook("railway up"))
+    })
+  })
+
+  describe("new safe commands", () => {
+    test("ipconfig getifaddr en0 → allow", async () => {
+      expectAllow(await runHook("ipconfig getifaddr en0"))
+    })
+
+    test("cc -o main main.c → allow", async () => {
+      expectAllow(await runHook("cc -o main main.c"))
+    })
+
+    test("gcc -Wall -o test test.c → allow", async () => {
+      expectAllow(await runHook("gcc -Wall -o test test.c"))
+    })
+  })
+
   describe("redis-cli — read vs write", () => {
     test("redis-cli ping → allow", async () => {
       expectAllow(await runHook("redis-cli ping"))
