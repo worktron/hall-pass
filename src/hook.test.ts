@@ -346,6 +346,38 @@ describe("Write/Edit tool integration", () => {
   })
 })
 
+describe("Write/Edit secret detection", () => {
+  test("Write with AWS key in content → prompt", async () => {
+    expectPrompt(await runHookForTool("Write", {
+      file_path: "/tmp/config.ts",
+      content: `const key = "AKIAIOSFODNN7EXAMPLE"`,
+    }))
+  })
+
+  test("Edit with GitHub token in new_string → prompt", async () => {
+    expectPrompt(await runHookForTool("Edit", {
+      file_path: "/tmp/config.ts",
+      new_string: `const token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"`,
+      old_string: `const token = ""`,
+    }))
+  })
+
+  test("Write with clean content → allow", async () => {
+    expectAllow(await runHookForTool("Write", {
+      file_path: "/tmp/safe.ts",
+      content: `export const greeting = "hello world"`,
+    }))
+  })
+
+  test("Edit with PEM private key → prompt", async () => {
+    expectPrompt(await runHookForTool("Edit", {
+      file_path: "/tmp/certs.ts",
+      new_string: `-----BEGIN RSA PRIVATE KEY-----\nMIIEow...`,
+      old_string: `// placeholder`,
+    }))
+  })
+})
+
 describe("feedback layer — should ALLOW with additionalContext nudge", () => {
   test("curl | python3 -c with json.loads → allow with jq nudge", async () => {
     const cmd = `curl -s https://api.example.com | python3 -c "import json, sys; print(json.loads(sys.stdin.read())['key'])"`
@@ -513,6 +545,42 @@ describe("new inspectors — integration", () => {
     })
   })
 
+  describe("railway — subcommand inspection", () => {
+    test("railway whoami → allow", async () => {
+      expectAllow(await runHook("railway whoami"))
+    })
+
+    test("railway status → allow", async () => {
+      expectAllow(await runHook("railway status"))
+    })
+
+    test("railway run bun start → allow", async () => {
+      expectAllow(await runHook("railway run bun start"))
+    })
+
+    test("railway run rm -rf / → prompt", async () => {
+      expectPrompt(await runHook("railway run rm -rf /"))
+    })
+
+    test("railway up → prompt", async () => {
+      expectPrompt(await runHook("railway up"))
+    })
+  })
+
+  describe("new safe commands", () => {
+    test("ipconfig getifaddr en0 → allow", async () => {
+      expectAllow(await runHook("ipconfig getifaddr en0"))
+    })
+
+    test("cc -o main main.c → allow", async () => {
+      expectAllow(await runHook("cc -o main main.c"))
+    })
+
+    test("gcc -Wall -o test test.c → allow", async () => {
+      expectAllow(await runHook("gcc -Wall -o test test.c"))
+    })
+  })
+
   describe("redis-cli — read vs write", () => {
     test("redis-cli ping → allow", async () => {
       expectAllow(await runHook("redis-cli ping"))
@@ -537,6 +605,38 @@ describe("new inspectors — integration", () => {
     test("redis-cli (interactive) → prompt", async () => {
       expectPrompt(await runHook("redis-cli"))
     })
+  })
+})
+
+describe("Write/Edit secret detection", () => {
+  test("Write with AWS key in content → prompt", async () => {
+    expectPrompt(await runHookForTool("Write", {
+      file_path: "/tmp/config.ts",
+      content: `const key = "AKIAIOSFODNN7EXAMPLE"`,
+    }))
+  })
+
+  test("Edit with GitHub token in new_string → prompt", async () => {
+    expectPrompt(await runHookForTool("Edit", {
+      file_path: "/tmp/config.ts",
+      new_string: `const token = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij"`,
+      old_string: `const token = ""`,
+    }))
+  })
+
+  test("Write with clean content → allow", async () => {
+    expectAllow(await runHookForTool("Write", {
+      file_path: "/tmp/safe.ts",
+      content: `export const greeting = "hello world"`,
+    }))
+  })
+
+  test("Edit with PEM private key → prompt", async () => {
+    expectPrompt(await runHookForTool("Edit", {
+      file_path: "/tmp/certs.ts",
+      new_string: `-----BEGIN RSA PRIVATE KEY-----\nMIIEow...`,
+      old_string: `// placeholder`,
+    }))
   })
 })
 

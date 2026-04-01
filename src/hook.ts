@@ -68,6 +68,8 @@ import { createAudit } from "./audit.ts"
 import { checkFilePath } from "./paths.ts"
 import { checkFeedbackRules } from "./feedback.ts"
 import { createEvalContext } from "./evaluate.ts"
+import { detectSecret } from "./secrets.ts"
+import { detectExfilDomain } from "./network.ts"
 
 // -- Read hook input from stdin --
 
@@ -114,6 +116,16 @@ if (toolName === "Write" || toolName === "Edit") {
     prompt(`path-blocked: ${decision.reason}`, `File path ${decision.reason}`)
   }
 
+  // Scan Write content / Edit new_string for hardcoded secrets
+  const content = (toolInput.content ?? toolInput.new_string ?? "") as string
+  if (content) {
+    const secret = detectSecret(content)
+    if (secret) {
+      audit.log({ tool: toolName, input: filePath, decision: "prompt", reason: `secret: ${secret.type}`, layer: "secrets" })
+      prompt(`secret in ${toolName.toLowerCase()}: ${secret.type}`, `${toolName} contains a hardcoded ${secret.type} (${secret.preview})`)
+    }
+  }
+
   audit.log({ tool: toolName, input: filePath, decision: "allow", reason: "no path match", layer: "paths" })
   allow("write/edit allowed")
 }
@@ -129,7 +141,7 @@ debug("bash", { command })
 
 // -- Parse with shfmt --
 
-const proc = Bun.spawn(["shfmt", "--tojson"], {
+const proc = Bun.spawn(["shfmt", "-ln", "bash", "--tojson"], {
   stdin: new Response(command),
   stdout: "pipe",
   stderr: "pipe",
@@ -151,12 +163,41 @@ try {
   prompt("shfmt json failed", "Could not parse command")
 }
 
+// -- Pre-parse checks (on raw command string) --
+
+// Secret detection in command text
+const secret = detectSecret(command)
+if (secret) {
+  debug("secret", secret)
+  audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `secret: ${secret.type}`, layer: "secrets" })
+  prompt(`secret: ${secret.type}`, `Command contains a hardcoded ${secret.type} (${secret.preview})`)
+}
+
+// Network exfiltration domain detection
+const exfilDomain = detectExfilDomain(command)
+if (exfilDomain) {
+  debug("exfil", { domain: exfilDomain })
+  audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `exfil: ${exfilDomain}`, layer: "network" })
+  prompt(`exfil: ${exfilDomain}`, `Command targets known data-exfiltration service "${exfilDomain}"`)
+}
+
 // -- Extract commands and AST-level data --
 
 const commandInfos = extractCommandInfos(ast)
 debug("commands", commandInfos.map(c => c.name))
 
 // -- AST-level checks (not per-command) --
+
+// Pipe target inspection — detect `curl | bash`, `echo | sh`, etc.
+const PIPE_SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "eval"])
+for (let i = 1; i < commandInfos.length; i++) {
+  const name = commandInfos[i]!.name
+  if (PIPE_SHELLS.has(name)) {
+    debug("pipe-target", { name, position: i })
+    audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `pipe to ${name}`, layer: "pipe-target" })
+    prompt(`pipe to ${name}`, `Piping into "${name}" executes arbitrary piped content as code`)
+  }
+}
 
 // Redirects against protected paths
 const redirects = extractRedirects(ast)
