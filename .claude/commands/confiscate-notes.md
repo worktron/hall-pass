@@ -133,10 +133,33 @@ Remove any `tmp-*` files in the project directory created during this process.
 ### Final test run
 Run the full test suite to verify: `bun test`
 
-## Phase 6: Commit
+## Phase 6: Commit & Ship
 
 Commit on a feature branch. The commit message should summarize:
 - Number of commands added to SAFE_COMMANDS
 - Number of inspectors created
 - Number of settings files cleaned
 - New test count vs previous
+
+Push the branch, create a PR, and merge it.
+
+## Phase 7: Deploy
+
+After the PR is merged, deploy the updated hook to this machine:
+
+```bash
+git checkout main && git pull
+```
+
+The hook runs directly from source (`bun src/hook.ts`), so pulling the latest
+main IS deploying — no build step needed. The next tool call in any Claude Code
+session will use the updated safelist/inspectors.
+
+Verify the hook is pointing at this repo:
+
+```bash
+jq '.hooks.PreToolUse[] | select(.hooks[]?.command | contains("hall-pass"))' \
+  ~/.claude/settings.json
+```
+
+Confirm the `command` path resolves to this working directory.
