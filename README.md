@@ -82,8 +82,8 @@ hall-pass-install
 ### Install (from source)
 
 ```bash
-git clone https://github.com/worktron/hall-pass.git ~/Workspace/hall-pass
-cd ~/Workspace/hall-pass
+git clone https://github.com/worktron/hall-pass.git
+cd hall-pass
 bun install
 bun run install
 ```

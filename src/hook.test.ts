@@ -228,7 +228,7 @@ describe("hook integration", () => {
       `psql postgres://user:pass@localhost:5433/db -c "SELECT DISTINCT advertiser_id FROM search_index LIMIT 1" 2>&1`,
       `psql postgres://localhost/db -t -c "SELECT count(*) FROM orders"`,
       `psql -c 'SHOW search_path'`,
-      `PGPASSWORD=deepcurrent psql -h localhost -p 5434 -U deepcurrent -d deepcurrent_test -c "\\dt api_keys"`,
+      `PGPASSWORD=testpass psql -h localhost -p 5434 -U testuser -d testdb -c "\\dt api_keys"`,
       `psql -c "\\d+ users"`,
       `psql -c "\\l"`,
     ]

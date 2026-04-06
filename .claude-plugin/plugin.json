@@ -1,0 +1,9 @@
+{
+  "name": "hall-pass",
+  "version": "0.2.0",
+  "description": "Auto-approves safe commands, blocks dangerous ones, and protects sensitive files",
+  "repository": "https://github.com/worktron/hall-pass",
+  "license": "MIT",
+  "keywords": ["safety", "guardrails", "hooks", "permissions"],
+  "hooks": "../hooks/hooks.json"
+}

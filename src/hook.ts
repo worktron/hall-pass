@@ -143,8 +143,23 @@ debug("bash", { command })
 
 // -- Parse with shfmt --
 
-const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
-const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
+function findShfmt(): string {
+  // Check relative to source (development)
+  const fromSrc = resolve(import.meta.dir, "..", "bin", "shfmt")
+  if (existsSync(fromSrc)) return fromSrc
+  // Check relative to compiled binary
+  const fromBin = resolve(process.execPath, "..", "shfmt")
+  if (existsSync(fromBin)) return fromBin
+  // Check plugin root (when installed as Claude Code plugin)
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT
+  if (pluginRoot) {
+    const fromPlugin = resolve(pluginRoot, "bin", "shfmt")
+    if (existsSync(fromPlugin)) return fromPlugin
+  }
+  // Fall back to PATH
+  return "shfmt"
+}
+const shfmtBin = findShfmt()
 
 const proc = Bun.spawn([shfmtBin, "-ln", "bash", "--tojson"], {
   stdin: new Response(command),
