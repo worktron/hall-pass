@@ -23,7 +23,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/anthonyyam/hall-pass.git"
+    "url": "git+https://github.com/worktron/hall-pass.git"
   },
   "license": "MIT",
   "keywords": [

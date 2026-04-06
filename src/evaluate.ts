@@ -35,6 +35,7 @@ export interface EvalContext {
   configSafe: Set<string>
   dbClients: Set<string>
   protectedBranches?: Set<string>
+  shfmtBin: string
   pipelineCommands: CommandInfo[]
   evaluate: (cmd: CommandInfo) => EvalResult
 }
@@ -45,6 +46,7 @@ export interface EvalContext {
 export function createEvalContext(
   config: HallPassConfig,
   pipelineCommands: CommandInfo[],
+  shfmtBin: string = "shfmt",
 ): EvalContext {
   const configSafe = new Set(config.commands.safe)
   const dbClients = new Set([...DB_CLIENTS, ...config.commands.db_clients])
@@ -57,6 +59,7 @@ export function createEvalContext(
     configSafe,
     dbClients,
     protectedBranches,
+    shfmtBin,
     pipelineCommands,
     evaluate: (cmd) => evaluateBashCommand(cmd, ctx),
   }

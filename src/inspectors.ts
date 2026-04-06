@@ -58,7 +58,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     if (args.length === 1) return allow("eval: no args")
     // eval concatenates all args and re-parses — parse with shfmt
     const script = args.slice(1).join(" ")
-    const proc = Bun.spawnSync(["shfmt", "-ln", "bash", "--tojson"], {
+    const proc = Bun.spawnSync([ctx.shfmtBin, "-ln", "bash", "--tojson"], {
       stdin: Buffer.from(script),
     })
     if (proc.exitCode !== 0) {
@@ -486,7 +486,7 @@ function shellInspector(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
   }
 
   // Parse the inline script with shfmt
-  const proc = Bun.spawnSync(["shfmt", "-ln", "bash", "--tojson"], {
+  const proc = Bun.spawnSync([ctx.shfmtBin, "-ln", "bash", "--tojson"], {
     stdin: Buffer.from(script),
   })
 

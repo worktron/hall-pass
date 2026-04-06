@@ -71,7 +71,6 @@ Optional JSON Lines audit log records every decision with timestamp, tool, input
 ### Prerequisites
 
 - [Bun](https://bun.sh)
-- [shfmt](https://github.com/mvdan/sh) (`brew install shfmt`)
 
 ### Install (npm)
 
@@ -83,18 +82,18 @@ hall-pass-install
 ### Install (from source)
 
 ```bash
-git clone https://github.com/anthonyyam/hall-pass.git ~/Workspace/hall-pass
+git clone https://github.com/worktron/hall-pass.git ~/Workspace/hall-pass
 cd ~/Workspace/hall-pass
 bun install
-bun run install-hook
+bun run install
 ```
 
-This registers hooks for Bash, Write, and Edit tools in `~/.claude/settings.json` and sets up non-Bash tool permissions (Read, Glob, Grep, WebFetch, WebSearch).
+This downloads [shfmt](https://github.com/mvdan/sh) (used to parse Bash commands), registers hooks for Bash, Write, and Edit tools in `~/.claude/settings.json`, and sets up non-Bash tool permissions (Read, Glob, Grep, WebFetch, WebSearch).
 
 ### Uninstall
 
 ```bash
-bun run uninstall-hook
+bun run uninstall
 ```
 
 ### Verify
@@ -111,7 +110,7 @@ Configuration is **optional** — everything works with zero config. To customiz
 # Generate default config with comments
 hall-pass-init
 # Or with the install command
-bun run install-hook --init
+bun run install --init
 ```
 
 Config location: `~/.config/hall-pass/config.toml` (override with `HALL_PASS_CONFIG` env var).

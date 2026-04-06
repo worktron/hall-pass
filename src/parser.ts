@@ -89,10 +89,10 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
       const path = word ? extractWordValue(word) : null
       if (!path) continue
 
-      // Op values in shfmt: 54 = >, 56 = >>, 55 = >|, 62 = &>, 63 = &>>
-      // Read ops: 52 = <
+      // Op values in shfmt: 63 = >, 64 = >>, 69 = >|, 74 = &>, 76 = &>>
+      // Read ops: 65 = <
       const op = redir.Op as number | undefined
-      const isWrite = op !== undefined && (op === 54 || op === 55 || op === 56 || op === 62 || op === 63)
+      const isWrite = op !== undefined && (op === 63 || op === 64 || op === 69 || op === 74 || op === 76)
       results.push({ path, op: isWrite ? "write" : "read" })
     }
   }

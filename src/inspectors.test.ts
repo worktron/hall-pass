@@ -16,8 +16,14 @@ const TEST_CONFIG: HallPassConfig = {
   debug: { enabled: false },
 }
 
+import { resolve } from "path"
+import { existsSync } from "fs"
+
+const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
+const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
+
 function makeCtx(pipelineCommands: CommandInfo[] = []): EvalContext {
-  return createEvalContext(TEST_CONFIG, pipelineCommands)
+  return createEvalContext(TEST_CONFIG, pipelineCommands, shfmtBin)
 }
 
 function expectAllow(cmdInfo: CommandInfo, ctx?: EvalContext) {
@@ -834,7 +840,7 @@ describe("evaluateBashCommand", () => {
         ...TEST_CONFIG,
         git: { protected_branches: ["release"] },
       }
-      const ctx = createEvalContext(config, [])
+      const ctx = createEvalContext(config, [], shfmtBin)
       // "release" is protected, "main" falls back to defaults only when no config branches
       expectPrompt(cmd("git", "push", "origin", "release"), ctx)
     })

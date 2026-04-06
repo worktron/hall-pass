@@ -234,7 +234,7 @@ if (commandInfos.length === 0) {
 
 // -- Per-command evaluation --
 
-const ctx = createEvalContext(config, commandInfos)
+const ctx = createEvalContext(config, commandInfos, shfmtBin)
 
 let hasPass = false
 

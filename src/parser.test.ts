@@ -1,9 +1,14 @@
 import { describe, test, expect } from "bun:test"
+import { resolve } from "path"
+import { existsSync } from "fs"
 import { extractCommands } from "./parser.ts"
+
+const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
+const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
 
 /** Helper: parse a shell command with shfmt and extract command names */
 async function commandsIn(command: string): Promise<string[]> {
-  const proc = Bun.spawn(["shfmt", "--tojson"], {
+  const proc = Bun.spawn([shfmtBin, "--tojson"], {
     stdin: new Response(command),
     stdout: "pipe",
     stderr: "pipe",
