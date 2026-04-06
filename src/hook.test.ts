@@ -432,6 +432,7 @@ describe("expanded safelist — integration", () => {
       "sw_vers",
       "dig example.com",
       "nslookup example.com",
+      "whois example.com",
       "ping -c 3 8.8.8.8",
       "pgrep node",
       "open index.html",
