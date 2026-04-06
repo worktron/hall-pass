@@ -32,7 +32,7 @@ export const SAFE_COMMANDS = new Set([
   // ── Network & DNS ────────────────────────────────────────────────────
   "curl", "wget", "ping",
   "dig", "nslookup", "dns-sd",
-  "ipconfig",
+  "ipconfig", "whois",
 
   // ── Text processing ──────────────────────────────────────────────────
   "grep", "egrep", "fgrep", "rg", "sort", "uniq",
