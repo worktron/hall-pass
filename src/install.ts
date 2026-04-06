@@ -19,17 +19,41 @@ const HOOK_COMMAND = `bun ${HOOK_PATH}`
 const NON_BASH_TOOLS = ["Read", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"]
 const HOOK_MATCHERS = ["Bash", "Write", "Edit"]
 
-// -- Check shfmt --
+// -- Check / install shfmt --
+
+const SHFMT_VERSION = "v3.13.0"
+
+async function installShfmt(): Promise<string> {
+  const platform = process.platform === "darwin" ? "darwin" : "linux"
+  const arch = process.arch === "arm64" ? "arm64" : "amd64"
+  const asset = `shfmt_${SHFMT_VERSION}_${platform}_${arch}`
+  const url = `https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/${asset}`
+
+  // Install alongside hall-pass source
+  const binDir = resolve(import.meta.dir, "..", "bin")
+  await Bun.spawn(["mkdir", "-p", binDir]).exited
+  const dest = resolve(binDir, "shfmt")
+
+  console.log(`Downloading shfmt ${SHFMT_VERSION}...`)
+  const resp = await fetch(url)
+  if (!resp.ok) {
+    console.error(`Failed to download shfmt: ${resp.status} ${resp.statusText}`)
+    console.error(`URL: ${url}`)
+    process.exit(1)
+  }
+
+  await Bun.write(dest, resp)
+  await Bun.spawn(["chmod", "+x", dest]).exited
+  console.log(`Installed shfmt to ${dest}`)
+  return dest
+}
 
 const shfmt = Bun.spawnSync(["which", "shfmt"])
 if (shfmt.exitCode !== 0) {
-  console.error("shfmt is required but not installed.")
-  console.error("  brew install shfmt    (macOS)")
-  console.error("  go install mvdan.cc/sh/v3/cmd/shfmt@latest    (Go)")
-  console.error("  snap install shfmt    (Linux)")
-  process.exit(1)
+  await installShfmt()
+} else {
+  console.log("shfmt found:", shfmt.stdout.toString().trim())
 }
-console.log("shfmt found:", shfmt.stdout.toString().trim())
 
 // -- Read or create settings.json --
 

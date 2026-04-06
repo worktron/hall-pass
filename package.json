@@ -16,8 +16,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "install-hook": "bun src/install.ts",
-    "uninstall-hook": "bun src/uninstall.ts",
+    "install": "bun src/install.ts",
+    "uninstall": "bun src/uninstall.ts",
     "test": "bun test",
     "typecheck": "bun build src/hook.ts --no-bundle --no-emit"
   },

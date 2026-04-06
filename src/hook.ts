@@ -61,6 +61,8 @@ function prompt(reason: string, message: string): never {
   process.exit(0)
 }
 
+import { resolve } from "path"
+import { existsSync } from "fs"
 import { extractCommandInfos, extractRedirects } from "./parser.ts"
 import { loadConfig } from "./config.ts"
 import { createDebug } from "./debug.ts"
@@ -141,7 +143,10 @@ debug("bash", { command })
 
 // -- Parse with shfmt --
 
-const proc = Bun.spawn(["shfmt", "-ln", "bash", "--tojson"], {
+const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
+const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
+
+const proc = Bun.spawn([shfmtBin, "-ln", "bash", "--tojson"], {
   stdin: new Response(command),
   stdout: "pipe",
   stderr: "pipe",
