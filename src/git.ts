@@ -19,13 +19,17 @@ const SAFE_SUBCOMMANDS = new Set([
   // Read-only
   "status", "log", "diff", "show", "branch", "tag", "remote",
   "describe", "rev-parse", "rev-list", "ls-files", "ls-tree",
-  "cat-file", "reflog", "shortlog", "blame", "bisect",
+  "cat-file", "reflog", "shortlog", "blame", "annotate", "bisect",
   "name-rev", "cherry", "count-objects", "fsck", "verify-pack",
-  "whatchanged",
+  "whatchanged", "grep", "show-ref", "show-branch", "for-each-ref",
+  "ls-remote", "check-ignore", "check-attr", "check-mailmap",
+  "check-ref-format", "merge-base", "diff-tree", "diff-index",
+  "diff-files", "range-diff", "var", "help",
 
   // Safe local writes
   "add", "commit", "stash", "fetch", "pull", "merge",
   "cherry-pick", "revert", "notes", "worktree",
+  "am", "format-patch", "archive", "bundle", "request-pull",
 
   // Branch/navigation (without destructive flags)
   "checkout", "switch", "restore",
