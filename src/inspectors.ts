@@ -371,6 +371,37 @@ export const INSPECTORS: Record<string, Inspector> = {
     return allow("networksetup: read-only query")
   },
 
+  tmutil: (cmdInfo) => {
+    const args = cmdInfo.args
+    if (args.length < 2) return allow("tmutil: no subcommand")
+    const subcmd = args[1]!
+    const safeCmds = new Set([
+      "version", "status", "destinationinfo", "latestbackup", "listbackups",
+      "machinedirectory", "calculatedrift", "compare", "uniquesize",
+      "isexcludedpath", "associatedisk",
+    ])
+    if (safeCmds.has(subcmd)) return allow(`tmutil: ${subcmd}`)
+    return prompt(`tmutil: ${subcmd}`, `"tmutil ${subcmd}" modifies Time Machine backups`)
+  },
+
+  diskutil: (cmdInfo) => {
+    const args = cmdInfo.args
+    if (args.length < 2) return allow("diskutil: no subcommand")
+    const subcmd = args[1]!
+    const safeCmds = new Set([
+      "list", "info", "activity", "verifyDisk", "verifyVolume",
+    ])
+    if (safeCmds.has(subcmd)) return allow(`diskutil: ${subcmd}`)
+    // `diskutil apfs` has its own subcommands — only allow read-only ones
+    if (subcmd === "apfs") {
+      const apfsSub = args[2]
+      const apfsSafe = new Set(["list", "listUsers", "listCryptoUsers", "listGroups"])
+      if (apfsSub && apfsSafe.has(apfsSub)) return allow(`diskutil apfs: ${apfsSub}`)
+      return prompt(`diskutil apfs: ${apfsSub ?? "no subcommand"}`, `"diskutil apfs ${apfsSub ?? ""}" can modify APFS volumes`)
+    }
+    return prompt(`diskutil: ${subcmd}`, `"diskutil ${subcmd}" can modify or erase disks`)
+  },
+
   security: (cmdInfo) => {
     const args = cmdInfo.args
     if (args.length < 2) return allow("security: no subcommand")
