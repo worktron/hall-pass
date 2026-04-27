@@ -478,6 +478,33 @@ describe("evaluateBashCommand", () => {
     // Web servers (new)
     test("ngrok http 3000 → allow", () => expectAllow(cmd("ngrok", "http", "3000")))
     test("ngrok version → allow", () => expectAllow(cmd("ngrok", "version")))
+
+    // Process management (new)
+    test("wait → allow", () => expectAllow(cmd("wait")))
+    test("wait %1 → allow", () => expectAllow(cmd("wait", "%1")))
+    test("disown → allow", () => expectAllow(cmd("disown")))
+    test("disown %1 → allow", () => expectAllow(cmd("disown", "%1")))
+
+    // Package managers (new)
+    test("uvx --version → allow", () => expectAllow(cmd("uvx", "--version")))
+    test("uvx --from snowflake-labs-mcp some-tool → allow", () => expectAllow(cmd("uvx", "--from", "snowflake-labs-mcp", "some-tool")))
+
+    // Network & DNS (new)
+    test("whois example.com → allow", () => expectAllow(cmd("whois", "example.com")))
+    test("whois -h whois.nic.work matter.work → allow", () => expectAllow(cmd("whois", "-h", "whois.nic.work", "matter.work")))
+
+    // File & data inspection (new)
+    test("shasum -a 256 file.sql → allow", () => expectAllow(cmd("shasum", "-a", "256", "file.sql")))
+
+    // macOS utilities (new)
+    test("mdls -name kMDItemPageCount file.pdf → allow", () => expectAllow(cmd("mdls", "-name", "kMDItemPageCount", "file.pdf")))
+
+    // Document & media processing (new)
+    test("qpdf --pages file.pdf 1-5 -- out.pdf → allow", () => expectAllow(cmd("qpdf", "--pages", "file.pdf", "1-5", "--", "out.pdf")))
+    test("exiftool -a -u -g1 image.heic → allow", () => expectAllow(cmd("exiftool", "-a", "-u", "-g1", "image.heic")))
+
+    // Postgres utilities (new)
+    test("pg_isready -h localhost -p 5432 → allow", () => expectAllow(cmd("pg_isready", "-h", "localhost", "-p", "5432")))
   })
 
   describe("xcrun", () => {
@@ -644,6 +671,30 @@ describe("evaluateBashCommand", () => {
     test("bare security → allow", () => {
       expectAllow(cmd("security"))
     })
+  })
+
+  describe("tmutil", () => {
+    test("tmutil latestbackup → allow", () => expectAllow(cmd("tmutil", "latestbackup")))
+    test("tmutil destinationinfo → allow", () => expectAllow(cmd("tmutil", "destinationinfo")))
+    test("tmutil listbackups → allow", () => expectAllow(cmd("tmutil", "listbackups")))
+    test("tmutil status → allow", () => expectAllow(cmd("tmutil", "status")))
+    test("tmutil delete /backup → prompt", () => expectPrompt(cmd("tmutil", "delete", "/backup")))
+    test("tmutil disable → prompt", () => expectPrompt(cmd("tmutil", "disable")))
+    test("tmutil startbackup → prompt", () => expectPrompt(cmd("tmutil", "startbackup")))
+    test("bare tmutil → allow", () => expectAllow(cmd("tmutil")))
+  })
+
+  describe("diskutil", () => {
+    test("diskutil list → allow", () => expectAllow(cmd("diskutil", "list")))
+    test("diskutil info disk1 → allow", () => expectAllow(cmd("diskutil", "info", "disk1")))
+    test("diskutil verifyDisk disk1 → allow", () => expectAllow(cmd("diskutil", "verifyDisk", "disk1")))
+    test("diskutil apfs list → allow", () => expectAllow(cmd("diskutil", "apfs", "list")))
+    test("diskutil apfs listUsers disk1 → allow", () => expectAllow(cmd("diskutil", "apfs", "listUsers", "disk1")))
+    test("diskutil eraseDisk JHFS+ Untitled disk1 → prompt", () => expectPrompt(cmd("diskutil", "eraseDisk", "JHFS+", "Untitled", "disk1")))
+    test("diskutil unmount disk1 → prompt", () => expectPrompt(cmd("diskutil", "unmount", "disk1")))
+    test("diskutil apfs deleteVolume disk1s1 → prompt", () => expectPrompt(cmd("diskutil", "apfs", "deleteVolume", "disk1s1")))
+    test("diskutil apfs (no subcommand) → prompt", () => expectPrompt(cmd("diskutil", "apfs")))
+    test("bare diskutil → allow", () => expectAllow(cmd("diskutil")))
   })
 
   describe("networksetup", () => {

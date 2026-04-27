@@ -21,17 +21,18 @@ export const SAFE_COMMANDS = new Set([
   "xcodebuild",
 
   // ── Package managers ─────────────────────────────────────────────────
-  "pip", "pip3", "uv", "poetry",
+  "pip", "pip3", "uv", "uvx", "poetry",
   "gem", "bundle", "rake",
   "brew",
 
   // ── Process management ───────────────────────────────────────────────
   "lsof", "ps", "pgrep", "top",
   "sleep", "pkill", "killall",
+  "wait", "disown",
 
   // ── Network & DNS ────────────────────────────────────────────────────
   "curl", "wget", "ping",
-  "dig", "nslookup", "dns-sd",
+  "dig", "nslookup", "dns-sd", "whois",
   "ipconfig",
 
   // ── Text processing ──────────────────────────────────────────────────
@@ -45,7 +46,7 @@ export const SAFE_COMMANDS = new Set([
   // ── File & data inspection ───────────────────────────────────────────
   "file", "stat", "strings", "realpath", "basename", "dirname",
   "less", "more", "xxd", "od", "tree",
-  "md5", "md5sum", "sha256sum", "sha1sum",
+  "md5", "md5sum", "sha256sum", "sha1sum", "shasum",
 
   // ── Shell builtins & utilities ───────────────────────────────────────
   "echo", "printf", "pwd", "which", "whoami", "test", "true", "false",
@@ -57,7 +58,7 @@ export const SAFE_COMMANDS = new Set([
   "sw_vers", "sysctl", "last", "log",
 
   // ── macOS utilities (read-only) ──────────────────────────────────────
-  "open", "sips", "mdfind", "mkcert",
+  "open", "sips", "mdfind", "mdls", "mkcert",
   "ioreg", "system_profiler", "vm_stat", "memory_pressure",
   "dscacheutil", "pmset", "textutil", "osxphotos", "powermetrics",
 
@@ -86,6 +87,7 @@ export const SAFE_COMMANDS = new Set([
 
   // ── Document & media processing ──────────────────────────────────────
   "pandoc", "pdftotext", "pdftoppm", "pdfinfo",
+  "qpdf", "exiftool",
 
   // ── Security & certificates ──────────────────────────────────────────
   "ssh-add", "ssh-keygen",
@@ -95,6 +97,9 @@ export const SAFE_COMMANDS = new Set([
 
   // ── Local databases (file-based) ─────────────────────────────────────
   "sqlite3",
+
+  // ── Postgres utilities (no SQL execution) ────────────────────────────
+  "pg_isready",
 ])
 
 
