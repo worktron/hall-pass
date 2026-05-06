@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { resolve } from "path"
 import { existsSync } from "fs"
-import { extractCommands } from "./parser.ts"
+import { extractCommands, extractRedirects, type RedirectInfo } from "./parser.ts"
 
 const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
 const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
@@ -103,5 +103,54 @@ describe("extractCommands", () => {
 
   test("heredoc", async () => {
     expect(await commandsIn("cat <<EOF\nhello\nEOF")).toEqual(["cat"])
+  })
+})
+
+async function redirectsIn(command: string): Promise<RedirectInfo[]> {
+  const proc = Bun.spawn([shfmtBin, "--tojson"], {
+    stdin: new Response(command),
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  const stdout = await new Response(proc.stdout).text()
+  await proc.exited
+  if (proc.exitCode !== 0) throw new Error(`shfmt failed: ${command}`)
+  return extractRedirects(JSON.parse(stdout))
+}
+
+describe("extractRedirects", () => {
+  test("> classified as write", async () => {
+    expect(await redirectsIn("cat foo > out")).toEqual([{ path: "out", op: "write" }])
+  })
+
+  test(">> classified as write", async () => {
+    expect(await redirectsIn("echo x >> out")).toEqual([{ path: "out", op: "write" }])
+  })
+
+  test(">| classified as write", async () => {
+    expect(await redirectsIn("echo x >| out")).toEqual([{ path: "out", op: "write" }])
+  })
+
+  test("&> classified as write", async () => {
+    expect(await redirectsIn("cmd &> out")).toEqual([{ path: "out", op: "write" }])
+  })
+
+  test("&>> classified as write", async () => {
+    expect(await redirectsIn("cmd &>> out")).toEqual([{ path: "out", op: "write" }])
+  })
+
+  test("<> classified as write (read-write can truncate)", async () => {
+    expect(await redirectsIn("cmd <> out")).toEqual([{ path: "out", op: "write" }])
+  })
+
+  test("< classified as read", async () => {
+    expect(await redirectsIn("cat < in")).toEqual([{ path: "in", op: "read" }])
+  })
+
+  test("2>&1 not flagged as write to a file path", async () => {
+    // Op 59 (>&) targets an FD, not a path. Word value is "1" — left as read so
+    // checkFilePath skips it (no glob will match the literal "1").
+    const redirs = await redirectsIn("echo hi 2>&1")
+    expect(redirs).toEqual([{ path: "1", op: "read" }])
   })
 })

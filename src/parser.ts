@@ -89,10 +89,15 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
       const path = word ? extractWordValue(word) : null
       if (!path) continue
 
-      // Op values in shfmt: 63 = >, 64 = >>, 69 = >|, 74 = &>, 76 = &>>
-      // Read ops: 65 = <
+      // Op values from shfmt's syntax.RedirOperator (verified against shfmt v3.12+):
+      // 54 = >    55 = >>    56 = <      57 = <>     59 = >& (dup FD)
+      // 60 = >|   61 = <<    63 = <<<    64 = &>     65 = &>>
+      // Treat as write: redirect operators that can clobber a file path target.
+      // <> is read-write — counted as write because it can truncate/create.
+      // 59 (>&) targets a file descriptor, not a path — leave as read so the
+      // path check skips it (the "path" is just a numeric FD).
       const op = redir.Op as number | undefined
-      const isWrite = op !== undefined && (op === 63 || op === 64 || op === 69 || op === 74 || op === 76)
+      const isWrite = op !== undefined && (op === 54 || op === 55 || op === 57 || op === 60 || op === 64 || op === 65)
       results.push({ path, op: isWrite ? "write" : "read" })
     }
   }
