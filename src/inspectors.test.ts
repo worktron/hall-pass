@@ -505,6 +505,14 @@ describe("evaluateBashCommand", () => {
 
     // Postgres utilities (new)
     test("pg_isready -h localhost -p 5432 → allow", () => expectAllow(cmd("pg_isready", "-h", "localhost", "-p", "5432")))
+
+    // Network & DNS (new)
+    test("host example.com → allow", () => expectAllow(cmd("host", "example.com")))
+    test("host -t MX example.com → allow", () => expectAllow(cmd("host", "-t", "MX", "example.com")))
+
+    // macOS utilities (new)
+    test("scutil --dns → allow", () => expectAllow(cmd("scutil", "--dns")))
+    test("scutil --proxy → allow", () => expectAllow(cmd("scutil", "--proxy")))
   })
 
   describe("xcrun", () => {
@@ -790,6 +798,221 @@ describe("evaluateBashCommand", () => {
 
     test("bare railway → allow (no subcommand)", () => {
       expectAllow(cmd("railway"))
+    })
+  })
+
+  describe("aws", () => {
+    test("aws --version → allow", () => {
+      expectAllow(cmd("aws", "--version"))
+    })
+
+    test("aws help → allow", () => {
+      expectAllow(cmd("aws", "help"))
+    })
+
+    test("bare aws → allow (no service)", () => {
+      expectAllow(cmd("aws"))
+    })
+
+    // sts
+    test("aws sts get-caller-identity → allow", () => {
+      expectAllow(cmd("aws", "sts", "get-caller-identity"))
+    })
+
+    test("aws sts get-session-token → allow", () => {
+      expectAllow(cmd("aws", "sts", "get-session-token"))
+    })
+
+    test("aws sts assume-role → prompt (issues credentials)", () => {
+      expectPrompt(cmd("aws", "sts", "assume-role", "--role-arn", "arn:aws:iam::123:role/Foo", "--role-session-name", "x"))
+    })
+
+    test("aws sts get-federation-token → prompt", () => {
+      expectPrompt(cmd("aws", "sts", "get-federation-token", "--name", "x"))
+    })
+
+    // Generic verb-prefix heuristic
+    test("aws ec2 describe-instances → allow", () => {
+      expectAllow(cmd("aws", "ec2", "describe-instances"))
+    })
+
+    test("aws rds describe-db-instances → allow", () => {
+      expectAllow(cmd("aws", "rds", "describe-db-instances"))
+    })
+
+    test("aws ecs list-clusters → allow", () => {
+      expectAllow(cmd("aws", "ecs", "list-clusters"))
+    })
+
+    test("aws secretsmanager get-secret-value → allow", () => {
+      expectAllow(cmd("aws", "secretsmanager", "get-secret-value", "--secret-id", "foo"))
+    })
+
+    test("aws ssm get-parameter → allow", () => {
+      expectAllow(cmd("aws", "ssm", "get-parameter", "--name", "/foo"))
+    })
+
+    test("aws ec2 terminate-instances → prompt", () => {
+      expectPrompt(cmd("aws", "ec2", "terminate-instances", "--instance-ids", "i-abc"))
+    })
+
+    test("aws ecs delete-service → prompt", () => {
+      expectPrompt(cmd("aws", "ecs", "delete-service", "--cluster", "x", "--service", "y"))
+    })
+
+    test("aws rds delete-db-instance → prompt", () => {
+      expectPrompt(cmd("aws", "rds", "delete-db-instance", "--db-instance-identifier", "x"))
+    })
+
+    test("aws secretsmanager put-secret-value → prompt", () => {
+      expectPrompt(cmd("aws", "secretsmanager", "put-secret-value", "--secret-id", "x", "--secret-string", "y"))
+    })
+
+    test("aws ssm put-parameter → prompt", () => {
+      expectPrompt(cmd("aws", "ssm", "put-parameter", "--name", "/x", "--value", "y"))
+    })
+
+    // Global flags before service
+    test("aws --region us-east-1 ec2 describe-instances → allow", () => {
+      expectAllow(cmd("aws", "--region", "us-east-1", "ec2", "describe-instances"))
+    })
+
+    test("aws --profile prod sts get-caller-identity → allow", () => {
+      expectAllow(cmd("aws", "--profile", "prod", "sts", "get-caller-identity"))
+    })
+
+    test("aws --output=json --no-paginate ec2 describe-instances → allow", () => {
+      expectAllow(cmd("aws", "--output=json", "--no-paginate", "ec2", "describe-instances"))
+    })
+
+    // s3 dialect
+    test("aws s3 ls → allow", () => {
+      expectAllow(cmd("aws", "s3", "ls"))
+    })
+
+    test("aws s3 ls s3://bucket → allow", () => {
+      expectAllow(cmd("aws", "s3", "ls", "s3://bucket"))
+    })
+
+    test("aws s3 presign s3://bucket/key → allow", () => {
+      expectAllow(cmd("aws", "s3", "presign", "s3://bucket/key"))
+    })
+
+    test("aws s3 cp file.txt s3://bucket/ → prompt", () => {
+      expectPrompt(cmd("aws", "s3", "cp", "file.txt", "s3://bucket/"))
+    })
+
+    test("aws s3 rm s3://bucket/key → prompt", () => {
+      expectPrompt(cmd("aws", "s3", "rm", "s3://bucket/key"))
+    })
+
+    test("aws s3 sync . s3://bucket/ → prompt", () => {
+      expectPrompt(cmd("aws", "s3", "sync", ".", "s3://bucket/"))
+    })
+
+    // sso
+    test("aws sso list-accounts → allow", () => {
+      expectAllow(cmd("aws", "sso", "list-accounts", "--access-token", "x"))
+    })
+
+    test("aws sso login → prompt", () => {
+      expectPrompt(cmd("aws", "sso", "login"))
+    })
+
+    // configure
+    test("aws configure list → allow", () => {
+      expectAllow(cmd("aws", "configure", "list"))
+    })
+
+    test("aws configure set region us-east-1 → prompt", () => {
+      expectPrompt(cmd("aws", "configure", "set", "region", "us-east-1"))
+    })
+
+    // DynamoDB-style read verbs without a standard prefix
+    test("aws dynamodb scan → allow", () => {
+      expectAllow(cmd("aws", "dynamodb", "scan", "--table-name", "x"))
+    })
+
+    test("aws dynamodb query → allow", () => {
+      expectAllow(cmd("aws", "dynamodb", "query", "--table-name", "x"))
+    })
+
+    test("aws dynamodb put-item → prompt", () => {
+      expectPrompt(cmd("aws", "dynamodb", "put-item", "--table-name", "x", "--item", "{}"))
+    })
+  })
+
+  describe("tailscale", () => {
+    test("tailscale status → allow", () => {
+      expectAllow(cmd("tailscale", "status"))
+    })
+
+    test("tailscale status --json → allow", () => {
+      expectAllow(cmd("tailscale", "status", "--json"))
+    })
+
+    test("tailscale ip → allow", () => {
+      expectAllow(cmd("tailscale", "ip"))
+    })
+
+    test("tailscale dns status → allow", () => {
+      expectAllow(cmd("tailscale", "dns", "status"))
+    })
+
+    test("tailscale netcheck → allow", () => {
+      expectAllow(cmd("tailscale", "netcheck"))
+    })
+
+    test("tailscale ping example-host → allow", () => {
+      expectAllow(cmd("tailscale", "ping", "example-host"))
+    })
+
+    test("tailscale whois 100.64.0.1 → allow", () => {
+      expectAllow(cmd("tailscale", "whois", "100.64.0.1"))
+    })
+
+    test("tailscale version → allow", () => {
+      expectAllow(cmd("tailscale", "version"))
+    })
+
+    test("tailscale --version → allow", () => {
+      expectAllow(cmd("tailscale", "--version"))
+    })
+
+    test("bare tailscale → allow (no subcommand)", () => {
+      expectAllow(cmd("tailscale"))
+    })
+
+    test("tailscale up → prompt (changes network state)", () => {
+      expectPrompt(cmd("tailscale", "up"))
+    })
+
+    test("tailscale down → prompt", () => {
+      expectPrompt(cmd("tailscale", "down"))
+    })
+
+    test("tailscale logout → prompt", () => {
+      expectPrompt(cmd("tailscale", "logout"))
+    })
+
+    test("tailscale set --advertise-routes=10.0.0.0/24 → prompt", () => {
+      expectPrompt(cmd("tailscale", "set", "--advertise-routes=10.0.0.0/24"))
+    })
+
+    test("tailscale serve → prompt", () => {
+      expectPrompt(cmd("tailscale", "serve", "https"))
+    })
+
+    test("tailscale ssh user@host → prompt", () => {
+      expectPrompt(cmd("tailscale", "ssh", "user@host"))
+    })
+
+    test("tailscale file cp file dest → prompt", () => {
+      expectPrompt(cmd("tailscale", "file", "cp", "file", "dest"))
+    })
+
+    test("tailscale cert example.ts.net → prompt (writes files)", () => {
+      expectPrompt(cmd("tailscale", "cert", "example.ts.net"))
     })
   })
 

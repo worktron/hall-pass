@@ -32,7 +32,7 @@ export const SAFE_COMMANDS = new Set([
 
   // ── Network & DNS ────────────────────────────────────────────────────
   "curl", "wget", "ping",
-  "dig", "nslookup", "dns-sd", "whois",
+  "dig", "nslookup", "dns-sd", "whois", "host",
   "ipconfig",
 
   // ── Text processing ──────────────────────────────────────────────────
@@ -61,6 +61,7 @@ export const SAFE_COMMANDS = new Set([
   "open", "sips", "mdfind", "mdls", "mkcert",
   "ioreg", "system_profiler", "vm_stat", "memory_pressure",
   "dscacheutil", "pmset", "textutil", "osxphotos", "powermetrics",
+  "scutil",
 
   // ── Dev tools ────────────────────────────────────────────────────────
   "shfmt", "direnv",

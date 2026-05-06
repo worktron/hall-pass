@@ -453,6 +453,104 @@ export const INSPECTORS: Record<string, Inspector> = {
     return prompt(`railway: ${subcmd}`, `"railway ${subcmd}" may modify deployment state`)
   },
 
+  aws: (cmdInfo) => {
+    const args = cmdInfo.args
+    // aws [global-options] <service> <verb> [params]
+    // Walk past leading global options to find the service token.
+    let i = 1
+    while (i < args.length) {
+      const arg = args[i]!
+      if (arg === "--version") return allow("aws: version")
+      if (arg === "--help" || arg === "-h" || arg === "help") return allow("aws: help")
+      // Boolean global flags
+      if (arg === "--debug" || arg === "--no-paginate" || arg === "--no-cli-pager" ||
+          arg === "--no-sign-request" || arg === "--no-verify-ssl" ||
+          arg === "--cli-auto-prompt" || arg === "--no-cli-auto-prompt") {
+        i++; continue
+      }
+      // Global flags with attached value (--foo=bar)
+      if (arg.startsWith("--profile=") || arg.startsWith("--region=") ||
+          arg.startsWith("--output=") || arg.startsWith("--query=") ||
+          arg.startsWith("--endpoint-url=") || arg.startsWith("--ca-bundle=") ||
+          arg.startsWith("--cli-read-timeout=") || arg.startsWith("--cli-connect-timeout=") ||
+          arg.startsWith("--color=")) {
+        i++; continue
+      }
+      // Global flags taking the next arg as value
+      if (arg === "--profile" || arg === "--region" || arg === "--output" ||
+          arg === "--query" || arg === "--endpoint-url" || arg === "--ca-bundle" ||
+          arg === "--cli-read-timeout" || arg === "--cli-connect-timeout" ||
+          arg === "--color") {
+        i += 2; continue
+      }
+      if (arg.startsWith("-")) { i++; continue }
+      break
+    }
+    if (i >= args.length) return allow("aws: no service")
+    const service = args[i]!.toLowerCase()
+    const verb = args[i + 1]?.toLowerCase()
+    if (!verb || verb === "help" || verb === "--help") return allow(`aws ${service}: help/no verb`)
+
+    // s3 has its own command verbs (not the standard service API verbs)
+    if (service === "s3") {
+      if (verb === "ls" || verb === "presign") return allow(`aws s3: ${verb}`)
+      return prompt(`aws s3: ${verb}`, `"aws s3 ${verb}" can modify or remove S3 objects`)
+    }
+
+    // sts: only allow info verbs; assume-role* and federation issue credentials
+    if (service === "sts") {
+      const safeSts = new Set([
+        "get-caller-identity", "get-session-token",
+        "get-access-key-info", "decode-authorization-message",
+      ])
+      if (safeSts.has(verb)) return allow(`aws sts: ${verb}`)
+      return prompt(`aws sts: ${verb}`, `"aws sts ${verb}" can issue or assume credentials`)
+    }
+
+    // configure: list/get are read-only; set/import/sso modify config
+    if (service === "configure") {
+      const safeConfigure = new Set(["list", "list-profiles", "get"])
+      if (safeConfigure.has(verb)) return allow(`aws configure: ${verb}`)
+      return prompt(`aws configure: ${verb}`, `"aws configure ${verb}" modifies AWS CLI config`)
+    }
+
+    // sso: login/logout open browsers and rewrite credentials
+    if (service === "sso") {
+      const safeSso = new Set(["list-accounts", "list-account-roles", "get-role-credentials"])
+      if (safeSso.has(verb)) return allow(`aws sso: ${verb}`)
+      return prompt(`aws sso: ${verb}`, `"aws sso ${verb}" affects SSO session state`)
+    }
+
+    // Generic verb-prefix heuristic for standard service APIs.
+    const READ_ONLY_PREFIXES = [
+      "describe-", "list-", "get-", "lookup-", "head-", "search-",
+      "select-", "view-", "validate-", "check-", "count-", "batch-get-",
+    ]
+    if (READ_ONLY_PREFIXES.some(p => verb.startsWith(p))) {
+      return allow(`aws ${service}: ${verb}`)
+    }
+    // Service-specific read verbs without a standard prefix
+    const READ_ONLY_VERBS = new Set(["scan", "query"])
+    if (READ_ONLY_VERBS.has(verb)) return allow(`aws ${service}: ${verb}`)
+
+    return prompt(`aws ${service}: ${verb}`, `"aws ${service} ${verb}" may modify AWS resources`)
+  },
+
+  tailscale: (cmdInfo) => {
+    const args = cmdInfo.args
+    if (args.length < 2) return allow("tailscale: no subcommand")
+    const subcmd = args[1]!.toLowerCase()
+    if (subcmd === "version" || subcmd === "--version" || subcmd === "-v") return allow("tailscale: version")
+    if (subcmd === "help" || subcmd === "--help" || subcmd === "-h") return allow("tailscale: help")
+    const safeCmds = new Set([
+      "status", "ip", "netcheck", "ping", "whois",
+      "dns",          // dns has only read sub-subcommands (status, query)
+      "bugreport", "metrics", "licenses",
+    ])
+    if (safeCmds.has(subcmd)) return allow(`tailscale: ${subcmd}`)
+    return prompt(`tailscale: ${subcmd}`, `"tailscale ${subcmd}" can change Tailscale network state`)
+  },
+
   "redis-cli": (cmdInfo) => {
     const args = cmdInfo.args
     // redis-cli [options] [command [args...]]
