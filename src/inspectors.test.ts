@@ -942,6 +942,112 @@ describe("evaluateBashCommand", () => {
     })
   })
 
+  describe("openssl", () => {
+    test("openssl version → allow", () => {
+      expectAllow(cmd("openssl", "version"))
+    })
+
+    test("bare openssl → allow", () => {
+      expectAllow(cmd("openssl"))
+    })
+
+    test("openssl s_client -connect host:443 → allow", () => {
+      expectAllow(cmd("openssl", "s_client", "-servername", "argon.worktron.com", "-connect", "argon.worktron.com:443"))
+    })
+
+    test("openssl ciphers → allow", () => {
+      expectAllow(cmd("openssl", "ciphers"))
+    })
+
+    test("openssl verify cert.pem → allow", () => {
+      expectAllow(cmd("openssl", "verify", "cert.pem"))
+    })
+
+    test("openssl asn1parse -in cert.pem → allow", () => {
+      expectAllow(cmd("openssl", "asn1parse", "-in", "cert.pem"))
+    })
+
+    // Inspect-style: read-only by default
+    test("openssl x509 -in cert.pem -text -noout → allow", () => {
+      expectAllow(cmd("openssl", "x509", "-in", "cert.pem", "-text", "-noout"))
+    })
+
+    test("openssl rsa -in key.pem -pubout → allow (no -out flag)", () => {
+      expectAllow(cmd("openssl", "rsa", "-in", "key.pem", "-pubout"))
+    })
+
+    test("openssl dgst -sha256 file → allow", () => {
+      expectAllow(cmd("openssl", "dgst", "-sha256", "file"))
+    })
+
+    test("openssl crl -in foo.crl -text → allow", () => {
+      expectAllow(cmd("openssl", "crl", "-in", "foo.crl", "-text"))
+    })
+
+    // Inspect-style with write flags → prompt
+    test("openssl x509 -req -signkey ca.key -in csr.pem -out cert.pem → prompt", () => {
+      expectPrompt(cmd("openssl", "x509", "-req", "-signkey", "ca.key", "-in", "csr.pem", "-out", "cert.pem"))
+    })
+
+    test("openssl x509 -in cert.pem -out copy.pem → prompt (-out)", () => {
+      expectPrompt(cmd("openssl", "x509", "-in", "cert.pem", "-out", "copy.pem"))
+    })
+
+    test("openssl rsa -in key.pem -out key2.pem → prompt", () => {
+      expectPrompt(cmd("openssl", "rsa", "-in", "key.pem", "-out", "key2.pem"))
+    })
+
+    test("openssl dgst -sign key.pem -out sig file → prompt (-out)", () => {
+      expectPrompt(cmd("openssl", "dgst", "-sign", "key.pem", "-out", "sig", "file"))
+    })
+
+    // req: -new / -newkey / -x509 generate keys or self-signed certs
+    test("openssl req -new -key key.pem → prompt (-new)", () => {
+      expectPrompt(cmd("openssl", "req", "-new", "-key", "key.pem"))
+    })
+
+    test("openssl req -newkey rsa:2048 -keyout key.pem -out csr.pem → prompt", () => {
+      expectPrompt(cmd("openssl", "req", "-newkey", "rsa:2048", "-keyout", "key.pem", "-out", "csr.pem"))
+    })
+
+    test("openssl req -x509 -days 365 → prompt (self-signed cert)", () => {
+      expectPrompt(cmd("openssl", "req", "-x509", "-days", "365"))
+    })
+
+    test("openssl req -in csr.pem -text -noout → allow (inspect existing CSR)", () => {
+      expectAllow(cmd("openssl", "req", "-in", "csr.pem", "-text", "-noout"))
+    })
+
+    // Dangerous subcommands always prompt
+    test("openssl genrsa 4096 → prompt", () => {
+      expectPrompt(cmd("openssl", "genrsa", "4096"))
+    })
+
+    test("openssl genpkey -algorithm RSA → prompt", () => {
+      expectPrompt(cmd("openssl", "genpkey", "-algorithm", "RSA"))
+    })
+
+    test("openssl enc -aes-256-cbc → prompt", () => {
+      expectPrompt(cmd("openssl", "enc", "-aes-256-cbc", "-in", "f", "-out", "g"))
+    })
+
+    test("openssl rsautl -encrypt → prompt", () => {
+      expectPrompt(cmd("openssl", "rsautl", "-encrypt", "-pubin", "-inkey", "pub.pem"))
+    })
+
+    test("openssl pkcs12 -export → prompt", () => {
+      expectPrompt(cmd("openssl", "pkcs12", "-export", "-in", "cert.pem"))
+    })
+
+    test("openssl ca -in csr.pem → prompt", () => {
+      expectPrompt(cmd("openssl", "ca", "-in", "csr.pem"))
+    })
+
+    test("openssl s_server -accept 443 → prompt (runs a TLS server)", () => {
+      expectPrompt(cmd("openssl", "s_server", "-accept", "443"))
+    })
+  })
+
   describe("tailscale", () => {
     test("tailscale status → allow", () => {
       expectAllow(cmd("tailscale", "status"))
