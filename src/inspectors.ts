@@ -536,6 +536,46 @@ export const INSPECTORS: Record<string, Inspector> = {
     return prompt(`aws ${service}: ${verb}`, `"aws ${service} ${verb}" may modify AWS resources`)
   },
 
+  openssl: (cmdInfo) => {
+    const args = cmdInfo.args
+    if (args.length < 2) return allow("openssl: no subcommand")
+    const subcmd = args[1]!.toLowerCase()
+    if (subcmd === "version" || subcmd === "--version" || subcmd === "-v" ||
+        subcmd === "help" || subcmd === "--help" || subcmd === "-h") {
+      return allow(`openssl: ${subcmd}`)
+    }
+
+    // Always-safe subcommands: pure information / TLS handshake / verification.
+    const ALWAYS_SAFE = new Set([
+      "list", "ciphers", "s_client", "verify",
+      "asn1parse", "prime", "errstr", "info",
+    ])
+    if (ALWAYS_SAFE.has(subcmd)) return allow(`openssl: ${subcmd}`)
+
+    // Inspect-style subcommands: read by default, but several flags turn them
+    // into write/sign operations.
+    const INSPECT_SUBCMDS = new Set(["x509", "rsa", "ec", "pkey", "dgst", "dsa", "crl", "req"])
+    if (INSPECT_SUBCMDS.has(subcmd)) {
+      const WRITE_FLAGS = new Set(["-out", "-signkey", "-CAkey", "-keyout", "-passout"])
+      // `req -new`/`-newkey`/`-x509` create a CSR or self-signed cert (often with a key)
+      if (subcmd === "req") {
+        for (const arg of args.slice(2)) {
+          if (arg === "-new" || arg === "-newkey" || arg === "-x509") {
+            return prompt(`openssl req: ${arg}`, `"openssl req ${arg}" generates keys or self-signed certs`)
+          }
+        }
+      }
+      for (const arg of args.slice(2)) {
+        if (WRITE_FLAGS.has(arg)) {
+          return prompt(`openssl ${subcmd}: ${arg}`, `"openssl ${subcmd} ${arg}" writes key material or signed output`)
+        }
+      }
+      return allow(`openssl: ${subcmd}`)
+    }
+
+    return prompt(`openssl: ${subcmd}`, `"openssl ${subcmd}" can generate keys, sign, or encrypt`)
+  },
+
   tailscale: (cmdInfo) => {
     const args = cmdInfo.args
     if (args.length < 2) return allow("tailscale: no subcommand")
