@@ -18,7 +18,7 @@ export type GitDecision =
 const SAFE_SUBCOMMANDS = new Set([
   // Read-only
   "status", "log", "diff", "show", "branch", "tag", "remote",
-  "describe", "rev-parse", "rev-list", "ls-files", "ls-tree",
+  "describe", "rev-parse", "rev-list", "ls-files", "ls-tree", "ls-remote",
   "cat-file", "reflog", "shortlog", "blame", "bisect",
   "name-rev", "cherry", "count-objects", "fsck", "verify-pack",
   "whatchanged",
