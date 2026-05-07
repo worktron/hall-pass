@@ -19,6 +19,7 @@ describe("checkGitCommand", () => {
       "git blame src/hook.ts",
       "git describe --tags",
       "git ls-files",
+      "git ls-remote --heads origin",
       "git cat-file -p HEAD",
       "git reflog",
       "git config user.email",
