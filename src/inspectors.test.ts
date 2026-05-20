@@ -1122,6 +1122,44 @@ describe("evaluateBashCommand", () => {
     })
   })
 
+  describe("xattr", () => {
+    test("xattr file → allow (list)", () => {
+      expectAllow(cmd("xattr", "/tmp/file.txt"))
+    })
+
+    test("xattr -l file → allow (long list)", () => {
+      expectAllow(cmd("xattr", "-l", "/tmp/file.txt"))
+    })
+
+    test("xattr -p attr file → allow (print)", () => {
+      expectAllow(cmd("xattr", "-p", "com.google.drivefs.item-id", "/tmp/file.txt"))
+    })
+
+    test("xattr -p name#S file → allow (quoted printed name)", () => {
+      expectAllow(cmd("xattr", "-p", "com.google.drivefs.item-id#S", "/tmp/file.txt"))
+    })
+
+    test("xattr -w name value file → prompt (write attr)", () => {
+      expectPrompt(cmd("xattr", "-w", "user.foo", "bar", "/tmp/file.txt"))
+    })
+
+    test("xattr -d name file → prompt (delete attr)", () => {
+      expectPrompt(cmd("xattr", "-d", "user.foo", "/tmp/file.txt"))
+    })
+
+    test("xattr -c file → prompt (clear all)", () => {
+      expectPrompt(cmd("xattr", "-c", "/tmp/file.txt"))
+    })
+
+    test("xattr -rw recursive write → prompt (bundled flags)", () => {
+      expectPrompt(cmd("xattr", "-rw", "user.foo", "bar", "/tmp/dir"))
+    })
+
+    test("bare xattr → allow", () => {
+      expectAllow(cmd("xattr"))
+    })
+  })
+
   describe("redis-cli", () => {
     test("redis-cli ping → allow", () => {
       expectAllow(cmd("redis-cli", "ping"))

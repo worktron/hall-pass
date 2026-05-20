@@ -28,7 +28,7 @@ export const SAFE_COMMANDS = new Set([
   // ── Process management ───────────────────────────────────────────────
   "lsof", "ps", "pgrep", "top",
   "sleep", "pkill", "killall",
-  "wait", "disown",
+  "wait", "disown", "jobs",
 
   // ── Network & DNS ────────────────────────────────────────────────────
   "curl", "wget", "ping",
@@ -89,6 +89,7 @@ export const SAFE_COMMANDS = new Set([
   // ── Document & media processing ──────────────────────────────────────
   "pandoc", "pdftotext", "pdftoppm", "pdfinfo",
   "qpdf", "exiftool",
+  "ffmpeg", "ffprobe", "rsvg-convert",
 
   // ── Security & certificates ──────────────────────────────────────────
   "ssh-add", "ssh-keygen",

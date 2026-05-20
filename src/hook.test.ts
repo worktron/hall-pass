@@ -468,6 +468,11 @@ describe("expanded safelist — integration", () => {
       "dns-sd -B _http._tcp local",
       "ioreg -l",
       "mkcert localhost",
+      "jobs -l",
+      "ffmpeg -version",
+      "ffmpeg -i input.mp4 -vf scale=1280:-1 output.mp4",
+      "ffprobe -v error -show_entries stream=codec_name input.mp4",
+      "rsvg-convert -w 512 -h 512 icon.svg -o icon.png",
     ]
 
     for (const cmd of allowed) {
@@ -604,6 +609,24 @@ describe("new inspectors — integration", () => {
 
     test("redis-cli (interactive) → prompt", async () => {
       expectPrompt(await runHook("redis-cli"))
+    })
+  })
+
+  describe("xattr — read vs write", () => {
+    test("xattr -l file → allow", async () => {
+      expectAllow(await runHook("xattr -l /tmp/file.txt"))
+    })
+
+    test("xattr -p attr file → allow", async () => {
+      expectAllow(await runHook("xattr -p com.google.drivefs.item-id /tmp/file.txt"))
+    })
+
+    test("xattr -w name value file → prompt", async () => {
+      expectPrompt(await runHook("xattr -w user.foo bar /tmp/file.txt"))
+    })
+
+    test("xattr -d name file → prompt", async () => {
+      expectPrompt(await runHook("xattr -d user.foo /tmp/file.txt"))
     })
   })
 })

@@ -591,6 +591,28 @@ export const INSPECTORS: Record<string, Inspector> = {
     return prompt(`tailscale: ${subcmd}`, `"tailscale ${subcmd}" can change Tailscale network state`)
   },
 
+  xattr: (cmdInfo) => {
+    // xattr [-lrsvx] file...                  list/print (read)
+    // xattr -p [-lrsvx] attr_name file...      print specific attr (read)
+    // xattr -w [-rsx] attr_name value file...  write attr (modifies file metadata)
+    // xattr -d [-rsv] attr_name file...        delete attr
+    // xattr -c [-rsv] file...                  clear all attrs
+    const args = cmdInfo.args
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
+      if (!arg.startsWith("-") || arg === "-") break
+      // Long flags
+      if (arg === "--help" || arg === "--version") return allow("xattr: help/version")
+      // Short flag bundles like -lp, -ls. Check each char.
+      for (const ch of arg.slice(1)) {
+        if (ch === "w" || ch === "d" || ch === "c") {
+          return prompt(`xattr: -${ch}`, `"xattr -${ch}" modifies file extended attributes`)
+        }
+      }
+    }
+    return allow("xattr: read-only")
+  },
+
   "redis-cli": (cmdInfo) => {
     const args = cmdInfo.args
     // redis-cli [options] [command [args...]]
