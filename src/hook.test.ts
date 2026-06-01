@@ -461,6 +461,8 @@ describe("expanded safelist — integration", () => {
       "pip3 install flask",
       "xcodebuild -project App.xcodeproj",
       "sw_vers",
+      "[ -f /tmp/x ]",
+      "seq 1 10",
       "dig example.com",
       "nslookup example.com",
       "ping -c 3 8.8.8.8",
