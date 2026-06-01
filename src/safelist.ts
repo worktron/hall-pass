@@ -51,7 +51,7 @@ export const SAFE_COMMANDS = new Set([
   // ── Shell builtins & utilities ───────────────────────────────────────
   "echo", "printf", "pwd", "which", "whoami", "test", "true", "false",
   "cd", "pushd", "popd", "export", "set", "unset", "read",
-  "type", "date",
+  "type", "date", "seq",
 
   // ── System info (read-only) ──────────────────────────────────────────
   "hostname", "uname", "id", "df", "du", "free", "uptime", "nproc", "arch",

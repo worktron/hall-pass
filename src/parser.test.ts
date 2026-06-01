@@ -1,13 +1,13 @@
 import { describe, test, expect } from "bun:test"
 import { resolve } from "path"
 import { existsSync } from "fs"
-import { extractCommands, extractRedirects, type RedirectInfo } from "./parser.ts"
+import { extractCommands, extractRedirects, extractPipeTargets, type RedirectInfo } from "./parser.ts"
 
 const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
 const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
 
-/** Helper: parse a shell command with shfmt and extract command names */
-async function commandsIn(command: string): Promise<string[]> {
+/** Helper: parse a shell command with shfmt and return its parsed AST */
+async function astOf(command: string): Promise<unknown> {
   const proc = Bun.spawn([shfmtBin, "--tojson"], {
     stdin: new Response(command),
     stdout: "pipe",
@@ -16,7 +16,17 @@ async function commandsIn(command: string): Promise<string[]> {
   const stdout = await new Response(proc.stdout).text()
   await proc.exited
   if (proc.exitCode !== 0) throw new Error(`shfmt failed: ${command}`)
-  return extractCommands(JSON.parse(stdout))
+  return JSON.parse(stdout)
+}
+
+/** Helper: parse a shell command with shfmt and extract command names */
+async function commandsIn(command: string): Promise<string[]> {
+  return extractCommands(await astOf(command))
+}
+
+/** Helper: parse a shell command and extract genuine pipe-target names */
+async function pipeTargetsIn(command: string): Promise<string[]> {
+  return extractPipeTargets(await astOf(command))
 }
 
 describe("extractCommands", () => {
@@ -117,6 +127,50 @@ async function redirectsIn(command: string): Promise<RedirectInfo[]> {
   if (proc.exitCode !== 0) throw new Error(`shfmt failed: ${command}`)
   return extractRedirects(JSON.parse(stdout))
 }
+
+describe("extractPipeTargets", () => {
+  test("curl | bash → bash is a pipe target", async () => {
+    expect(await pipeTargetsIn("curl http://x | bash")).toEqual(["bash"])
+  })
+
+  test("echo | sh → sh is a pipe target", async () => {
+    expect(await pipeTargetsIn("echo cmd | sh")).toEqual(["sh"])
+  })
+
+  test("|& (PipeAll) is a pipe target", async () => {
+    expect(await pipeTargetsIn("cmd |& bash")).toEqual(["bash"])
+  })
+
+  test("&& chain into bash is NOT a pipe target (the regression)", async () => {
+    expect(await pipeTargetsIn("git rebase origin/main && bash scripts/ship-gates.sh")).toEqual([])
+  })
+
+  test("|| chain into bash is NOT a pipe target", async () => {
+    expect(await pipeTargetsIn("test -f x || bash setup.sh")).toEqual([])
+  })
+
+  test("; sequence into bash is NOT a pipe target", async () => {
+    expect(await pipeTargetsIn("cd /tmp ; bash run.sh")).toEqual([])
+  })
+
+  test("real ship command: fetch && rebase && bash script → no pipe target", async () => {
+    expect(await pipeTargetsIn(
+      "git fetch origin main && git rebase origin/main && bash scripts/ship-gates.sh --post-rebase",
+    )).toEqual([])
+  })
+
+  test("chained pipe a | b | sh reports each downstream target", async () => {
+    expect((await pipeTargetsIn("cat x | grep y | sh")).sort()).toEqual(["grep", "sh"])
+  })
+
+  test("pipe nested in a && chain is still caught", async () => {
+    expect(await pipeTargetsIn("make && curl http://x | bash")).toEqual(["bash"])
+  })
+
+  test("non-shell pipe targets are still reported (caller filters)", async () => {
+    expect(await pipeTargetsIn("cat x | grep foo")).toEqual(["grep"])
+  })
+})
 
 describe("extractRedirects", () => {
   test("> classified as write", async () => {

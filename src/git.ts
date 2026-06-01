@@ -21,11 +21,11 @@ const SAFE_SUBCOMMANDS = new Set([
   "describe", "rev-parse", "rev-list", "ls-files", "ls-tree", "ls-remote",
   "cat-file", "reflog", "shortlog", "blame", "bisect",
   "name-rev", "cherry", "count-objects", "fsck", "verify-pack",
-  "whatchanged",
+  "whatchanged", "merge-base", "check-ignore",
 
   // Safe local writes
   "add", "commit", "stash", "fetch", "pull", "merge",
-  "cherry-pick", "revert", "notes", "worktree",
+  "cherry-pick", "revert", "notes", "worktree", "mv",
 
   // Branch/navigation (without destructive flags)
   "checkout", "switch", "restore",

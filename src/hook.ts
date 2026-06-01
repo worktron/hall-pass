@@ -63,7 +63,7 @@ function prompt(reason: string, message: string): never {
 
 import { resolve } from "path"
 import { existsSync } from "fs"
-import { extractCommandInfos, extractRedirects } from "./parser.ts"
+import { extractCommandInfos, extractRedirects, extractPipeTargets } from "./parser.ts"
 import { loadConfig } from "./config.ts"
 import { createDebug } from "./debug.ts"
 import { createAudit } from "./audit.ts"
@@ -208,12 +208,13 @@ debug("commands", commandInfos.map(c => c.name))
 
 // -- AST-level checks (not per-command) --
 
-// Pipe target inspection — detect `curl | bash`, `echo | sh`, etc.
+// Pipe target inspection — detect genuine `curl | bash`, `echo | sh`, etc.
+// Only fires on real pipe (`|` / `|&`) targets, NOT `&&`/`||` chains or
+// `;`-separated commands — so `git rebase && bash deploy.sh` is not flagged.
 const PIPE_SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "eval"])
-for (let i = 1; i < commandInfos.length; i++) {
-  const name = commandInfos[i]!.name
+for (const name of extractPipeTargets(ast)) {
   if (PIPE_SHELLS.has(name)) {
-    debug("pipe-target", { name, position: i })
+    debug("pipe-target", { name })
     audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `pipe to ${name}`, layer: "pipe-target" })
     prompt(`pipe to ${name}`, `Piping into "${name}" executes arbitrary piped content as code`)
   }

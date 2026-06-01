@@ -9,7 +9,7 @@ function cmd(name: string, ...rest: string[]): CommandInfo {
 
 /** Minimal config for unit tests — no path protection, no custom commands. */
 const TEST_CONFIG: HallPassConfig = {
-  commands: { safe: [], db_clients: [] },
+  commands: { safe: [], db_clients: [], safe_scripts: [] },
   git: { protected_branches: [] },
   paths: { protected: [], read_only: [], no_delete: [] },
   audit: { enabled: false, path: "" },
@@ -1413,6 +1413,40 @@ describe("evaluateBashCommand", () => {
 
     test("xargs bash -c 'rm file' → prompt", () => {
       expectPrompt(cmd("xargs", "bash", "-c", "rm \"$1\""))
+    })
+  })
+
+  describe("safe_scripts allowlist", () => {
+    function ctxWithScripts(patterns: string[]): EvalContext {
+      const config: HallPassConfig = {
+        ...TEST_CONFIG,
+        commands: { ...TEST_CONFIG.commands, safe_scripts: patterns },
+      }
+      return createEvalContext(config, [], shfmtBin)
+    }
+
+    test("bash <trusted script> → allow", () => {
+      expectAllow(cmd("bash", "scripts/ship-gates.sh"), ctxWithScripts(["**/scripts/ship-gates.sh"]))
+    })
+
+    test("bash <trusted script> with args → allow", () => {
+      expectAllow(cmd("bash", "scripts/ship-gates.sh", "--post-rebase"), ctxWithScripts(["**/scripts/ship-gates.sh"]))
+    })
+
+    test("bash <trusted script> by absolute path → allow", () => {
+      expectAllow(cmd("bash", "/Users/x/proj/scripts/ship-gates.sh"), ctxWithScripts(["**/scripts/ship-gates.sh"]))
+    })
+
+    test("basename pattern matches relative path → allow", () => {
+      expectAllow(cmd("bash", "scripts/ship-gates.sh"), ctxWithScripts(["ship-gates.sh"]))
+    })
+
+    test("bash <untrusted script> → prompt (not in allowlist)", () => {
+      expectPrompt(cmd("bash", "scripts/evil.sh"), ctxWithScripts(["**/scripts/ship-gates.sh"]))
+    })
+
+    test("empty allowlist → prompt (default behavior unchanged)", () => {
+      expectPrompt(cmd("bash", "scripts/ship-gates.sh"), ctxWithScripts([]))
     })
   })
 
