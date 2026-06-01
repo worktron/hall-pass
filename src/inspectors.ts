@@ -649,6 +649,31 @@ export const INSPECTORS: Record<string, Inspector> = {
   },
 }
 
+/** First positional (non-flag) argument after the shell name — the script file. */
+function findScriptArg(args: string[]): string | null {
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i]!
+    if (a.startsWith("-")) continue
+    return a
+  }
+  return null
+}
+
+/**
+ * Match a script path against the configured safe_scripts globs. Each glob is
+ * tested against the path as written and against the basename, so both
+ * "**\/scripts/ship-gates.sh" and "ship-gates.sh" match "scripts/ship-gates.sh".
+ */
+function matchesSafeScript(scriptPath: string, patterns: string[]): boolean {
+  if (patterns.length === 0) return false
+  const base = scriptPath.split("/").pop() ?? scriptPath
+  for (const pattern of patterns) {
+    const glob = new Bun.Glob(pattern)
+    if (glob.match(scriptPath) || glob.match(base)) return true
+  }
+  return false
+}
+
 /**
  * Inspector for sh/bash/zsh -c 'script'.
  * Parses the inline script with shfmt and evaluates each sub-command
@@ -667,8 +692,13 @@ function shellInspector(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
     }
   }
 
-  // No -c flag — running a script file, always prompt
+  // No -c flag — running a script file. Auto-approve if the script path
+  // matches a user-configured safe_scripts glob; otherwise prompt.
   if (script === undefined) {
+    const scriptPath = findScriptArg(args)
+    if (scriptPath && matchesSafeScript(scriptPath, ctx.config.commands.safe_scripts)) {
+      return allow(`${shell}: trusted script ${scriptPath.split("/").pop()}`)
+    }
     return prompt(`${shell}: script execution`, `Running "${shell}" with a script file`)
   }
 

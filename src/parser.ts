@@ -117,6 +117,63 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
 }
 
 /**
+ * Extract the names of commands that are genuine pipe targets — the
+ * right-hand side of a `|` or `|&` pipe.
+ *
+ * Op values from shfmt's syntax.BinaryOperator (verified against shfmt v3.12+):
+ *   10 = &&   11 = ||   12 = |   13 = |&
+ * Only 12 and 13 are real pipes. This deliberately does NOT match `&&`/`||`
+ * chains (which run sequentially, not piped) or `;`-separated statements
+ * (which shfmt represents as separate Stmts, not a BinaryCmd). So
+ * `git rebase && bash deploy.sh` is NOT reported as a pipe into bash, while
+ * `curl x | bash` is.
+ */
+export function extractPipeTargets(node: unknown): string[] {
+  if (!node || typeof node !== "object") return []
+
+  const n = node as Record<string, unknown>
+  const results: string[] = []
+
+  if (n.Type === "BinaryCmd" && (n.Op === 12 || n.Op === 13)) {
+    const name = leftmostCommandName(n.Y)
+    if (name) results.push(name)
+  }
+
+  // Recurse into all child values (catches pipes nested in subshells,
+  // command substitutions, loops, etc.)
+  for (const value of Object.values(n)) {
+    if (Array.isArray(value)) {
+      for (const item of value) results.push(...extractPipeTargets(item))
+    } else if (typeof value === "object" && value !== null) {
+      results.push(...extractPipeTargets(value))
+    }
+  }
+
+  return results
+}
+
+/**
+ * Name of the first (leftmost) command reachable from a Stmt/Cmd node.
+ * Descends through Stmt wrappers and the left side of nested pipes so that
+ * `a | b | c` reports both `b` and `c` as pipe targets.
+ */
+function leftmostCommandName(node: unknown): string | null {
+  if (!node || typeof node !== "object") return null
+
+  const n = node as Record<string, unknown>
+  // Stmt wraps the actual command in .Cmd
+  if (n.Cmd) return leftmostCommandName(n.Cmd)
+  // Nested pipe/chain — the immediate target is the left operand
+  if (n.Type === "BinaryCmd") return leftmostCommandName(n.X)
+  // CallExpr — extract the command name (strip any path prefix)
+  if (n.Type === "CallExpr" && Array.isArray(n.Args) && n.Args.length > 0) {
+    const first = extractWordValue(n.Args[0] as Record<string, unknown>)
+    return first ? first.split("/").pop()! : null
+  }
+  return null
+}
+
+/**
  * Extract environment variable assignments from a CallExpr node.
  * shfmt puts env var prefixes in CallExpr.Assigns[].
  */

@@ -11,7 +11,7 @@ import { homedir } from "os"
 import { resolve, dirname } from "path"
 
 export interface HallPassConfig {
-  commands: { safe: string[]; db_clients: string[] }
+  commands: { safe: string[]; db_clients: string[]; safe_scripts: string[] }
   git: { protected_branches: string[] }
   paths: { protected: string[]; read_only: string[]; no_delete: string[] }
   audit: { enabled: boolean; path: string }
@@ -36,7 +36,7 @@ export const DEFAULT_READ_ONLY_PATHS = [
 ]
 
 const DEFAULT_CONFIG: HallPassConfig = {
-  commands: { safe: [], db_clients: [] },
+  commands: { safe: [], db_clients: [], safe_scripts: [] },
   git: { protected_branches: [] },
   paths: { protected: DEFAULT_PROTECTED_PATHS, read_only: DEFAULT_READ_ONLY_PATHS, no_delete: [] },
   audit: { enabled: false, path: resolve(homedir(), ".config", "hall-pass", "audit.jsonl") },
@@ -79,6 +79,7 @@ function mergeConfig(defaults: HallPassConfig, user: Partial<Record<string, unkn
     commands: {
       safe: [...defaults.commands.safe, ...(commands?.safe ?? [])],
       db_clients: [...defaults.commands.db_clients, ...(commands?.db_clients ?? [])],
+      safe_scripts: [...defaults.commands.safe_scripts, ...(commands?.safe_scripts ?? [])],
     },
     git: {
       protected_branches: [...defaults.git.protected_branches, ...(git?.protected_branches ?? [])],
@@ -134,6 +135,12 @@ export function generateDefaultConfig(): string {
 # safe = ["terraform", "kubectl"]
 # Additional database clients to inspect SQL for
 # db_clients = ["pgcli"]
+# Local script paths (globs) to auto-approve when run via "bash <script>".
+# Trust implication: matched scripts run WITHOUT a prompt, so list only
+# scripts you control. Each glob is matched against the path as written and
+# against the basename, so "**/scripts/ship-gates.sh" and "ship-gates.sh"
+# both match "bash scripts/ship-gates.sh".
+# safe_scripts = ["**/scripts/ship-gates.sh", "**/scripts/deep-ship.sh"]
 
 [git]
 # Additional branches to protect (added to main, master, staging, production, prod)

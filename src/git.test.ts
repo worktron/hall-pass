@@ -23,6 +23,8 @@ describe("checkGitCommand", () => {
       "git cat-file -p HEAD",
       "git reflog",
       "git config user.email",
+      "git merge-base HEAD origin/main",
+      "git check-ignore .env.local",
     ]
 
     for (const cmd of safe) {
@@ -47,6 +49,7 @@ describe("checkGitCommand", () => {
       "git merge feature-branch",
       "git cherry-pick abc123",
       "git revert abc123",
+      "git mv old.ts new.ts",
     ]
 
     for (const cmd of safe) {
