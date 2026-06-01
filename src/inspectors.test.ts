@@ -1450,6 +1450,39 @@ describe("evaluateBashCommand", () => {
     })
   })
 
+  describe("op (1Password CLI)", () => {
+    test("op whoami → allow", () => expectAllow(cmd("op", "whoami")))
+    test("op signin → allow", () => expectAllow(cmd("op", "signin")))
+    test("op vault list → allow", () => expectAllow(cmd("op", "vault", "list")))
+    test("op account get → allow", () => expectAllow(cmd("op", "account", "get")))
+    test("op item list → allow", () => expectAllow(cmd("op", "item", "list")))
+    test("op user list → allow", () => expectAllow(cmd("op", "user", "list")))
+
+    test("op item get → prompt (secret retrieval)", () => expectPrompt(cmd("op", "item", "get", "GitHub")))
+    test("op read → prompt (secret retrieval)", () => expectPrompt(cmd("op", "read", "op://vault/item/field")))
+    test("op document get → prompt", () => expectPrompt(cmd("op", "document", "get", "doc")))
+    test("op run → prompt (executes command with injected secrets)", () =>
+      expectPrompt(cmd("op", "run", "--", "env")))
+    test("op inject → prompt", () => expectPrompt(cmd("op", "inject", "-i", "tpl")))
+    test("op item create → prompt (mutation)", () => expectPrompt(cmd("op", "item", "create")))
+    test("op item delete → prompt (mutation)", () => expectPrompt(cmd("op", "item", "delete", "x")))
+  })
+
+  describe("yt-dlp", () => {
+    test("metadata print → allow", () =>
+      expectAllow(cmd("yt-dlp", "--print", "title,duration", "--no-download", "https://youtu.be/x")))
+    test("subtitle download → allow", () =>
+      expectAllow(cmd("yt-dlp", "--skip-download", "--write-sub", "https://youtu.be/x")))
+    test("plain download → allow", () => expectAllow(cmd("yt-dlp", "https://youtu.be/x")))
+
+    test("--exec → prompt (arbitrary command)", () =>
+      expectPrompt(cmd("yt-dlp", "--exec", "rm -rf {}", "https://youtu.be/x")))
+    test("--exec=CMD form → prompt", () =>
+      expectPrompt(cmd("yt-dlp", "--exec=touch /tmp/pwned", "https://youtu.be/x")))
+    test("--external-downloader → prompt", () =>
+      expectPrompt(cmd("yt-dlp", "--external-downloader", "aria2c", "https://youtu.be/x")))
+  })
+
   describe("recursive evaluation", () => {
     test("find -exec python3 -c with JSON → feedback (recursive)", () => {
       const c = cmd("find", ".", "-exec", "python3", "-c", "json.loads(data)", "{}", ";")

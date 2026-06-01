@@ -415,6 +415,50 @@ export const INSPECTORS: Record<string, Inspector> = {
     return prompt(`security: ${subcmd}`, `"security ${subcmd}" accesses or modifies Keychain data`)
   },
 
+  // 1Password CLI. Allow read-only metadata; prompt on anything that exposes
+  // secret values (item get, read, document get), mutates vaults, or runs
+  // commands with injected secrets (run, inject). Default is prompt — a
+  // secrets manager should fail closed.
+  op: (cmdInfo) => {
+    const args = cmdInfo.args
+    // First positional after "op" is the noun/command; second is the verb.
+    const positionals = args.slice(1).filter((a) => !a.startsWith("-"))
+    const noun = positionals[0]
+    const verb = positionals[1]
+
+    // No subcommand (interactive/auth) or auth-only commands — safe.
+    if (noun === undefined || noun === "whoami" || noun === "signin" || noun === "signout") {
+      return allow(`op: ${noun ?? "interactive"}`)
+    }
+    // Metadata listings/queries that never return secret values.
+    const META_NOUNS = new Set(["account", "vault", "user", "group", "connect", "events-api"])
+    if (META_NOUNS.has(noun) && (verb === "list" || verb === "get" || verb === undefined)) {
+      return allow(`op: ${noun} ${verb ?? ""}`.trim())
+    }
+    if (noun === "item" && verb === "list") {
+      return allow("op: item list")
+    }
+    const label = `op: ${noun}${verb ? " " + verb : ""}`
+    return prompt(label, `"${label}" may expose secrets, mutate vaults, or run commands`)
+  },
+
+  // yt-dlp media downloader. Network fetch + file writes are in the same risk
+  // class as curl/wget (already safe). Prompt only when flags can execute
+  // arbitrary commands or external programs on downloaded content.
+  "yt-dlp": (cmdInfo) => {
+    const EXEC_FLAGS = new Set([
+      "--exec", "--exec-before-download",
+      "--external-downloader", "--downloader", "--downloader-args",
+    ])
+    for (const arg of cmdInfo.args.slice(1)) {
+      const flag = arg.split("=")[0]!
+      if (EXEC_FLAGS.has(flag)) {
+        return prompt(`yt-dlp: ${flag}`, `yt-dlp "${flag}" can execute arbitrary commands or external programs`)
+      }
+    }
+    return allow("yt-dlp: download")
+  },
+
   railway: (cmdInfo, ctx) => {
     const args = cmdInfo.args
     if (args.length < 2) return allow("railway: no subcommand")

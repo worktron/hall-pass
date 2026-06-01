@@ -180,6 +180,17 @@ describe("hook integration", () => {
     })
   })
 
+  describe("op / yt-dlp inspectors (integration)", () => {
+    test("op whoami → allow", async () => expectAllow(await runHook("op whoami")))
+    test("op vault list → allow", async () => expectAllow(await runHook("op vault list")))
+    test("op item get → ask", async () => expectPrompt(await runHook("op item get GitHub")))
+    test("op read → ask", async () => expectPrompt(await runHook("op read op://v/i/f")))
+    test("yt-dlp metadata → allow", async () =>
+      expectAllow(await runHook("yt-dlp --print title --no-download https://youtu.be/x")))
+    test("yt-dlp --exec → ask", async () =>
+      expectPrompt(await runHook("yt-dlp --exec 'touch /tmp/x' https://youtu.be/x")))
+  })
+
   describe("should PASS for unknown commands (no opinion)", () => {
     const passed = [
       "some-unknown-command --flag",
