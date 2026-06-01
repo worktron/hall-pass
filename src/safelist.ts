@@ -49,7 +49,7 @@ export const SAFE_COMMANDS = new Set([
   "md5", "md5sum", "sha256sum", "sha1sum", "shasum",
 
   // ── Shell builtins & utilities ───────────────────────────────────────
-  "echo", "printf", "pwd", "which", "whoami", "test", "true", "false",
+  "echo", "printf", "pwd", "which", "whoami", "test", "[", "true", "false",
   "cd", "pushd", "popd", "export", "set", "unset", "read",
   "type", "date", "seq",
 
