@@ -25,6 +25,22 @@ describe("checkGitCommand", () => {
       "git config user.email",
       "git merge-base HEAD origin/main",
       "git check-ignore .env.local",
+      "git grep -l -e PlacementField -e SheetColumn",
+      "git grep -n TODO",
+      "git show-ref",
+      "git show-ref --heads",
+      "git show-branch",
+      "git for-each-ref refs/heads/",
+      "git check-attr -a src/hook.ts",
+      "git check-mailmap 'Anthony Yam <a@b.com>'",
+      "git check-ref-format refs/heads/feat/x",
+      "git diff-tree -r HEAD",
+      "git diff-index HEAD",
+      "git diff-files",
+      "git range-diff main..feat/a main..feat/b",
+      "git var GIT_AUTHOR_IDENT",
+      "git help log",
+      "git annotate src/hook.ts",
     ]
 
     for (const cmd of safe) {
@@ -50,6 +66,11 @@ describe("checkGitCommand", () => {
       "git cherry-pick abc123",
       "git revert abc123",
       "git mv old.ts new.ts",
+      "git am patch.mbox",
+      "git format-patch -1 HEAD",
+      "git archive --format=tar HEAD",
+      "git bundle create repo.bundle --all",
+      "git request-pull origin/main origin feat/x",
     ]
 
     for (const cmd of safe) {
