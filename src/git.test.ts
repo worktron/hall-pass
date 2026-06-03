@@ -71,6 +71,9 @@ describe("checkGitCommand", () => {
       "git archive --format=tar HEAD",
       "git bundle create repo.bundle --all",
       "git request-pull origin/main origin feat/x",
+      // Safe branch deletion — git refuses to delete unmerged branches
+      "git branch -d feat/old",
+      "git branch --delete feat/old",
     ]
 
     for (const cmd of safe) {
@@ -148,9 +151,9 @@ describe("checkGitCommand", () => {
       // Discard all changes
       "git checkout .",
       "git restore .",
-      // Delete branch
+      // Force-delete branch (loses unmerged commits)
       "git branch -D feat/old",
-      "git branch -d feat/old",
+      "git branch --delete --force feat/old",
       // Stash destruction
       "git stash drop",
       "git stash clear",
