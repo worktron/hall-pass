@@ -1,0 +1,6 @@
+[test]
+# Raise the per-test timeout (bun default is 5000ms). The hook integration
+# tests spawn a fresh `bun src/hook.ts` per case; under machine load a cold
+# spawn can exceed 5s and flake. setDefaultTimeout(20s) lives in the preload
+# because bun does NOT honor a `timeout` key here (verified on 1.3.14).
+preload = "./src/test-setup.ts"
