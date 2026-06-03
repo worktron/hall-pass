@@ -1,4 +1,10 @@
 import { describe, test, expect } from "bun:test"
+import { resolve } from "path"
+import { existsSync } from "fs"
+import { decide, type HookDecision } from "./decide.ts"
+import { loadConfig, type HallPassConfig } from "./config.ts"
+import type { DebugFn } from "./debug.ts"
+import type { AuditLogger } from "./audit.ts"
 
 const HOOK_PATH = new URL("./hook.ts", import.meta.url).pathname
 
@@ -8,30 +14,47 @@ interface HookResult {
   stderr: string
 }
 
-/** Run the hook with a simulated Claude Code Bash input */
-async function runHook(command: string): Promise<HookResult> {
-  const input = JSON.stringify({ tool_name: "Bash", tool_input: { command } })
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: new Response(input),
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const [stdout, stderr] = await Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-  ])
-  await proc.exited
-  return { exitCode: proc.exitCode ?? 1, stdout, stderr }
+const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
+const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
+
+const noopDebug: DebugFn = () => {}
+const noopAudit: AuditLogger = { log: () => {} }
+
+let _config: HallPassConfig | undefined
+async function getConfig(): Promise<HallPassConfig> {
+  return (_config ??= await loadConfig())
 }
 
-/** Run the hook with a Write/Edit tool input */
+/** Map a HookDecision to the {exitCode, stdout, stderr} shape the spawned hook emitted. */
+function toResult(d: HookDecision): HookResult {
+  switch (d.decision) {
+    case "allow":
+      return { exitCode: 0, stderr: "", stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", permissionDecisionReason: d.reason } }) }
+    case "feedback":
+      return { exitCode: 0, stderr: "", stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", additionalContext: d.suggestion } }) }
+    case "ask":
+      return { exitCode: 0, stderr: "", stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: d.message } }) }
+    case "pass":
+      return { exitCode: 0, stderr: "", stdout: "" }
+  }
+}
+
+/** Run the hook's decision logic in-process — no `bun` subprocess spawn per test. */
+async function runHook(command: string): Promise<HookResult> {
+  const d = await decide("Bash", { command }, { config: await getConfig(), shfmtBin, debug: noopDebug, audit: noopAudit })
+  return toResult(d)
+}
+
+/** Run the hook in-process for a Write/Edit tool input. */
 async function runHookForTool(toolName: string, toolInput: Record<string, unknown>): Promise<HookResult> {
+  const d = await decide(toolName, toolInput, { config: await getConfig(), shfmtBin, debug: noopDebug, audit: noopAudit })
+  return toResult(d)
+}
+
+/** Spawn the real hook binary end-to-end (stdin → stdout → exit). Used by smoke tests. */
+async function spawnHook(toolName: string, toolInput: Record<string, unknown>): Promise<HookResult> {
   const input = JSON.stringify({ tool_name: toolName, tool_input: toolInput })
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: new Response(input),
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const proc = Bun.spawn(["bun", HOOK_PATH], { stdin: new Response(input), stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
@@ -712,5 +735,30 @@ describe("feedback layer — should NOT block legitimate usage", () => {
   test("curl | jq → allow (already using jq)", async () => {
     const result = await runHook("curl -s https://example.com | jq .data")
     expectAllow(result)
+  })
+})
+
+// The decision tests above run in-process for speed. These few spawn the real
+// `bun src/hook.ts` binary to verify the actual stdin → decide → stdout → exit
+// wiring (JSON shape, exit codes) that the in-process path bypasses.
+describe("end-to-end binary (real spawn)", () => {
+  test("allow: git status → exit 0 + allow JSON", async () => {
+    expectAllow(await spawnHook("Bash", { command: "git status" }))
+  })
+
+  test("ask: git push origin main → exit 0 + ask JSON", async () => {
+    expectPrompt(await spawnHook("Bash", { command: "git push origin main" }))
+  })
+
+  test("feedback: curl | python3 -c json → exit 0 + allow JSON with additionalContext", async () => {
+    expectFeedback(await spawnHook("Bash", { command: "curl -s https://example.com | python3 -c \"import json,sys; json.loads(sys.stdin.read())\"" }))
+  })
+
+  test("pass: unknown command → exit 0 + no output", async () => {
+    expectPass(await spawnHook("Bash", { command: "some-unknown-binary --flag" }))
+  })
+
+  test("Write to protected path (*.pem) → exit 0 + ask JSON", async () => {
+    expectPrompt(await spawnHook("Write", { file_path: "/tmp/secret.pem", content: "x" }))
   })
 })
