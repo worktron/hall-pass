@@ -1,22 +1,39 @@
 import { describe, test, expect } from "bun:test"
-
-const HOOK_PATH = new URL("./hook.ts", import.meta.url).pathname
+import { resolve } from "path"
+import { existsSync } from "fs"
+import { decide, type HookDecision } from "./decide.ts"
+import { loadConfig, type HallPassConfig } from "./config.ts"
+import type { DebugFn } from "./debug.ts"
+import type { AuditLogger } from "./audit.ts"
 
 interface HookResult {
   exitCode: number
   stdout: string
 }
 
+const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
+const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
+const noopDebug: DebugFn = () => {}
+const noopAudit: AuditLogger = { log: () => {} }
+
+let _config: HallPassConfig | undefined
+async function getConfig(): Promise<HallPassConfig> {
+  return (_config ??= await loadConfig())
+}
+
+function toStdout(d: HookDecision): string {
+  switch (d.decision) {
+    case "allow": return JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", permissionDecisionReason: d.reason } })
+    case "feedback": return JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", additionalContext: d.suggestion } })
+    case "ask": return JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: d.message } })
+    case "pass": return ""
+  }
+}
+
+/** Run the hook's decision logic in-process — no `bun` subprocess spawn per test. */
 async function runHook(command: string): Promise<HookResult> {
-  const input = JSON.stringify({ tool_name: "Bash", tool_input: { command } })
-  const proc = Bun.spawn(["bun", HOOK_PATH], {
-    stdin: new Response(input),
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const stdout = await new Response(proc.stdout).text()
-  await proc.exited
-  return { exitCode: proc.exitCode ?? 1, stdout }
+  const d = await decide("Bash", { command }, { config: await getConfig(), shfmtBin, debug: noopDebug, audit: noopAudit })
+  return { exitCode: 0, stdout: toStdout(d) }
 }
 
 function expectAllow(result: HookResult) {
