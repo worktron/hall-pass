@@ -79,7 +79,7 @@ const DESTRUCTIVE_FLAGS: Record<string, Set<string>> = {
   checkout: new Set(["."]),     // git checkout . = discard all changes
   restore: new Set(["."]),      // git restore . = discard all changes
   clean: new Set(["-f", "-fd", "-fx", "-fxd", "-fdx", "-ff"]),
-  branch: new Set(["-D", "--force", "-d"]),  // -d is less destructive but still deletes
+  branch: new Set(["-D", "--force"]),  // -d/--delete are safe: git refuses to delete unmerged branches; only -D/--force force-delete
   stash: new Set(["drop", "clear"]),
 }
 
