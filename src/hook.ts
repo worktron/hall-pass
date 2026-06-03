@@ -19,10 +19,27 @@ import { createDebug } from "./debug.ts"
 import { createAudit } from "./audit.ts"
 import { decide, findShfmt, type HookDecision } from "./decide.ts"
 
-// Diagnostic log — always writes to /tmp so we can debug hook failures
+// Diagnostic log — always writes to /tmp so we can debug hook failures.
+// diag() appends a few lines on every tool call, so cap the file's growth:
+// once per process, if it exceeds DIAG_MAX_BYTES, keep only the recent tail.
 const DIAG = "/tmp/hall-pass-diag.log"
+const DIAG_MAX_BYTES = 1_000_000
+const DIAG_KEEP_LINES = 2000
+let diagTrimChecked = false
 function diag(msg: string) {
-  try { require("fs").appendFileSync(DIAG, `${new Date().toISOString()} ${msg}\n`) } catch {}
+  try {
+    const fs = require("fs")
+    if (!diagTrimChecked) {
+      diagTrimChecked = true
+      try {
+        if (fs.statSync(DIAG).size > DIAG_MAX_BYTES) {
+          const tail = fs.readFileSync(DIAG, "utf8").split("\n").slice(-DIAG_KEEP_LINES).join("\n")
+          fs.writeFileSync(DIAG, tail)
+        }
+      } catch {}
+    }
+    fs.appendFileSync(DIAG, `${new Date().toISOString()} ${msg}\n`)
+  } catch {}
 }
 
 /** Emit the permissionDecision JSON to stdout, log the diagnostic line, and exit. */
