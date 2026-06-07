@@ -1,38 +1,47 @@
-import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { loadConfig, expandTilde, generateDefaultConfig, DEFAULT_PROTECTED_PATHS, DEFAULT_READ_ONLY_PATHS, initConfig } from "./config.ts"
-import { homedir } from "os"
-import { resolve } from "path"
-import { mkdtemp, rm } from "fs/promises"
-import { tmpdir } from "os"
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import {
+  loadConfig,
+  expandTilde,
+  generateDefaultConfig,
+  DEFAULT_PROTECTED_PATHS,
+  DEFAULT_READ_ONLY_PATHS,
+  initConfig,
+} from "./config.ts";
+import { homedir } from "os";
+import { resolve } from "path";
+import { mkdtemp, mkdir, rm, writeFile } from "fs/promises";
+import { tmpdir } from "os";
 
 describe("config", () => {
-  let tmpDir: string
+  let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(resolve(tmpdir(), "hall-pass-test-"))
-  })
+    tmpDir = await mkdtemp(resolve(tmpdir(), "hall-pass-test-"));
+  });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true })
-    delete process.env.HALL_PASS_CONFIG
-  })
+    await rm(tmpDir, { recursive: true, force: true });
+    delete process.env.HALL_PASS_CONFIG;
+  });
 
   test("returns defaults when no config file exists", async () => {
-    process.env.HALL_PASS_CONFIG = resolve(tmpDir, "nonexistent.toml")
-    const config = await loadConfig()
+    process.env.HALL_PASS_CONFIG = resolve(tmpDir, "nonexistent.toml");
+    const config = await loadConfig();
 
-    expect(config.commands.safe).toEqual([])
-    expect(config.commands.db_clients).toEqual([])
-    expect(config.git.protected_branches).toEqual([])
-    expect(config.audit.enabled).toBe(false)
-    expect(config.debug.enabled).toBe(false)
+    expect(config.commands.safe).toEqual([]);
+    expect(config.commands.db_clients).toEqual([]);
+    expect(config.git.protected_branches).toEqual([]);
+    expect(config.audit.enabled).toBe(false);
+    expect(config.debug.enabled).toBe(false);
     // Default protected paths should have ~ expanded
-    expect(config.paths.protected.length).toBeGreaterThan(0)
-  })
+    expect(config.paths.protected.length).toBeGreaterThan(0);
+  });
 
   test("parses valid TOML and merges with defaults", async () => {
-    const configPath = resolve(tmpDir, "config.toml")
-    await Bun.write(configPath, `
+    const configPath = resolve(tmpDir, "config.toml");
+    await Bun.write(
+      configPath,
+      `
 [commands]
 safe = ["terraform", "kubectl"]
 db_clients = ["pgcli"]
@@ -51,148 +60,247 @@ path = "${tmpDir}/audit.jsonl"
 
 [debug]
 enabled = true
-`)
-    process.env.HALL_PASS_CONFIG = configPath
-    const config = await loadConfig()
+`,
+    );
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
 
     // User commands extend defaults
-    expect(config.commands.safe).toEqual(["terraform", "kubectl"])
-    expect(config.commands.db_clients).toEqual(["pgcli"])
-    expect(config.git.protected_branches).toEqual(["release"])
+    expect(config.commands.safe).toEqual(["terraform", "kubectl"]);
+    expect(config.commands.db_clients).toEqual(["pgcli"]);
+    expect(config.git.protected_branches).toEqual(["release"]);
 
     // User paths extend default protected paths
-    expect(config.paths.protected).toContain("**/production.env")
+    expect(config.paths.protected).toContain("**/production.env");
     for (const defaultPath of DEFAULT_PROTECTED_PATHS) {
-      expect(config.paths.protected).toContain(expandTilde(defaultPath))
+      expect(config.paths.protected).toContain(expandTilde(defaultPath));
     }
 
-    expect(config.paths.read_only).toEqual([...DEFAULT_READ_ONLY_PATHS, "**/config/prod/**"])
-    expect(config.paths.no_delete).toEqual(["**/migrations/**"])
+    expect(config.paths.read_only).toEqual([
+      ...DEFAULT_READ_ONLY_PATHS,
+      "**/config/prod/**",
+    ]);
+    expect(config.paths.no_delete).toEqual(["**/migrations/**"]);
 
-    expect(config.audit.enabled).toBe(true)
-    expect(config.audit.path).toBe(`${tmpDir}/audit.jsonl`)
-    expect(config.debug.enabled).toBe(true)
-  })
+    expect(config.audit.enabled).toBe(true);
+    expect(config.audit.path).toBe(`${tmpDir}/audit.jsonl`);
+    expect(config.debug.enabled).toBe(true);
+  });
 
   test("user commands extend (not replace) built-in defaults", async () => {
-    const configPath = resolve(tmpDir, "config.toml")
-    await Bun.write(configPath, `
+    const configPath = resolve(tmpDir, "config.toml");
+    await Bun.write(
+      configPath,
+      `
 [paths]
 protected = ["**/my-secret"]
-`)
-    process.env.HALL_PASS_CONFIG = configPath
-    const config = await loadConfig()
+`,
+    );
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
 
     // Should have both default and user paths
-    expect(config.paths.protected).toContain("**/my-secret")
+    expect(config.paths.protected).toContain("**/my-secret");
     // Default .env pattern should be in read_only (with ~ expanded)
-    expect(config.paths.read_only.some(p => p.includes(".env"))).toBe(true)
-  })
+    expect(config.paths.read_only.some((p) => p.includes(".env"))).toBe(true);
+  });
 
   test("expands ~ in paths", async () => {
-    const configPath = resolve(tmpDir, "config.toml")
-    await Bun.write(configPath, `
+    const configPath = resolve(tmpDir, "config.toml");
+    await Bun.write(
+      configPath,
+      `
 [paths]
 protected = ["~/my-secrets/**"]
 
 [audit]
 enabled = true
 path = "~/logs/audit.jsonl"
-`)
-    process.env.HALL_PASS_CONFIG = configPath
-    const config = await loadConfig()
+`,
+    );
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
 
-    const home = homedir()
-    expect(config.paths.protected).toContain(resolve(home, "my-secrets/**"))
-    expect(config.audit.path).toBe(resolve(home, "logs/audit.jsonl"))
-  })
+    const home = homedir();
+    expect(config.paths.protected).toContain(resolve(home, "my-secrets/**"));
+    expect(config.audit.path).toBe(resolve(home, "logs/audit.jsonl"));
+  });
 
   test("handles malformed TOML gracefully (returns defaults)", async () => {
-    const configPath = resolve(tmpDir, "config.toml")
-    await Bun.write(configPath, "this is not [valid toml {{{{")
-    process.env.HALL_PASS_CONFIG = configPath
-    const config = await loadConfig()
+    const configPath = resolve(tmpDir, "config.toml");
+    await Bun.write(configPath, "this is not [valid toml {{{{");
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
 
     // Should return defaults without throwing
-    expect(config.commands.safe).toEqual([])
-    expect(config.paths.protected.length).toBeGreaterThan(0)
-  })
+    expect(config.commands.safe).toEqual([]);
+    expect(config.paths.protected.length).toBeGreaterThan(0);
+  });
 
   test("handles empty config file", async () => {
-    const configPath = resolve(tmpDir, "config.toml")
-    await Bun.write(configPath, "")
-    process.env.HALL_PASS_CONFIG = configPath
-    const config = await loadConfig()
+    const configPath = resolve(tmpDir, "config.toml");
+    await Bun.write(configPath, "");
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
 
-    expect(config.commands.safe).toEqual([])
-    expect(config.audit.enabled).toBe(false)
-  })
+    expect(config.commands.safe).toEqual([]);
+    expect(config.audit.enabled).toBe(false);
+  });
 
   test("HALL_PASS_CONFIG env var overrides default path", async () => {
-    const configPath = resolve(tmpDir, "custom-config.toml")
-    await Bun.write(configPath, `
+    const configPath = resolve(tmpDir, "custom-config.toml");
+    await Bun.write(
+      configPath,
+      `
 [debug]
 enabled = true
-`)
-    process.env.HALL_PASS_CONFIG = configPath
-    const config = await loadConfig()
-    expect(config.debug.enabled).toBe(true)
-  })
-})
+`,
+    );
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
+    expect(config.debug.enabled).toBe(true);
+  });
+
+  test("project-local .hall-pass extends safelist when next to .git/", async () => {
+    process.env.HALL_PASS_CONFIG = resolve(tmpDir, "no-global.toml");
+
+    const repo = resolve(tmpDir, "repo");
+    await mkdir(resolve(repo, ".git"), { recursive: true });
+    await writeFile(
+      resolve(repo, ".hall-pass"),
+      `[commands]\nsafe = ["terraform"]\nsafe_scripts = ["**/scripts/audit/*"]\n`,
+    );
+
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(repo);
+      const config = await loadConfig();
+      expect(config.commands.safe).toContain("terraform");
+      expect(config.commands.safe_scripts).toContain("**/scripts/audit/*");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  test("project-local .hall-pass without sibling .git/ is ignored", async () => {
+    process.env.HALL_PASS_CONFIG = resolve(tmpDir, "no-global.toml");
+
+    const notARepo = resolve(tmpDir, "loose");
+    await mkdir(notARepo, { recursive: true });
+    await writeFile(
+      resolve(notARepo, ".hall-pass"),
+      `[commands]\nsafe = ["evil"]\n`,
+    );
+
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(notARepo);
+      const config = await loadConfig();
+      expect(config.commands.safe).not.toContain("evil");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  test("project-local .hall-pass found by walking up from a nested cwd", async () => {
+    process.env.HALL_PASS_CONFIG = resolve(tmpDir, "no-global.toml");
+
+    const repo = resolve(tmpDir, "nested-repo");
+    await mkdir(resolve(repo, ".git"), { recursive: true });
+    await writeFile(
+      resolve(repo, ".hall-pass"),
+      `[commands]\nsafe = ["ansible"]\n`,
+    );
+    const deep = resolve(repo, "deep", "subdir");
+    await mkdir(deep, { recursive: true });
+
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(deep);
+      const config = await loadConfig();
+      expect(config.commands.safe).toContain("ansible");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
+  test("project-local entries layer on top of global ones", async () => {
+    const globalPath = resolve(tmpDir, "global.toml");
+    await writeFile(globalPath, `[commands]\nsafe = ["from-global"]\n`);
+    process.env.HALL_PASS_CONFIG = globalPath;
+
+    const repo = resolve(tmpDir, "layered-repo");
+    await mkdir(resolve(repo, ".git"), { recursive: true });
+    await writeFile(
+      resolve(repo, ".hall-pass"),
+      `[commands]\nsafe = ["from-project"]\n`,
+    );
+
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(repo);
+      const config = await loadConfig();
+      expect(config.commands.safe).toContain("from-global");
+      expect(config.commands.safe).toContain("from-project");
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+});
 
 describe("expandTilde", () => {
   test("expands ~/path", () => {
-    const result = expandTilde("~/foo/bar")
-    expect(result).toBe(resolve(homedir(), "foo/bar"))
-  })
+    const result = expandTilde("~/foo/bar");
+    expect(result).toBe(resolve(homedir(), "foo/bar"));
+  });
 
   test("expands bare ~", () => {
-    const result = expandTilde("~")
-    expect(result).toBe(homedir())
-  })
+    const result = expandTilde("~");
+    expect(result).toBe(homedir());
+  });
 
   test("leaves absolute paths unchanged", () => {
-    expect(expandTilde("/usr/bin")).toBe("/usr/bin")
-  })
+    expect(expandTilde("/usr/bin")).toBe("/usr/bin");
+  });
 
   test("leaves relative paths unchanged", () => {
-    expect(expandTilde("./foo")).toBe("./foo")
-  })
-})
+    expect(expandTilde("./foo")).toBe("./foo");
+  });
+});
 
 describe("generateDefaultConfig", () => {
   test("produces valid TOML with comments", () => {
-    const config = generateDefaultConfig()
-    expect(config).toContain("[commands]")
-    expect(config).toContain("[git]")
-    expect(config).toContain("[paths]")
-    expect(config).toContain("[audit]")
-    expect(config).toContain("[debug]")
-    expect(config).toContain("#")
-  })
-})
+    const config = generateDefaultConfig();
+    expect(config).toContain("[commands]");
+    expect(config).toContain("[git]");
+    expect(config).toContain("[paths]");
+    expect(config).toContain("[audit]");
+    expect(config).toContain("[debug]");
+    expect(config).toContain("#");
+  });
+});
 
 describe("initConfig", () => {
-  let tmpDir: string
+  let tmpDir: string;
 
   beforeEach(async () => {
-    tmpDir = await mkdtemp(resolve(tmpdir(), "hall-pass-init-"))
-  })
+    tmpDir = await mkdtemp(resolve(tmpdir(), "hall-pass-init-"));
+  });
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true })
-    delete process.env.HALL_PASS_CONFIG
-  })
+    await rm(tmpDir, { recursive: true, force: true });
+    delete process.env.HALL_PASS_CONFIG;
+  });
 
   test("creates config file with defaults", async () => {
-    const configPath = resolve(tmpDir, "subdir", "config.toml")
-    process.env.HALL_PASS_CONFIG = configPath
-    const result = await initConfig()
+    const configPath = resolve(tmpDir, "subdir", "config.toml");
+    process.env.HALL_PASS_CONFIG = configPath;
+    const result = await initConfig();
 
-    expect(result).toBe(configPath)
-    const file = Bun.file(configPath)
-    expect(await file.exists()).toBe(true)
-    const content = await file.text()
-    expect(content).toContain("[commands]")
-  })
-})
+    expect(result).toBe(configPath);
+    const file = Bun.file(configPath);
+    expect(await file.exists()).toBe(true);
+    const content = await file.text();
+    expect(content).toContain("[commands]");
+  });
+});

@@ -6,16 +6,17 @@
  * zero config using sensible defaults.
  */
 
-import { parse as parseTOML } from "smol-toml"
-import { homedir } from "os"
-import { resolve, dirname } from "path"
+import { parse as parseTOML } from "smol-toml";
+import { homedir } from "os";
+import { resolve, dirname } from "path";
+import { existsSync } from "fs";
 
 export interface HallPassConfig {
-  commands: { safe: string[]; db_clients: string[]; safe_scripts: string[] }
-  git: { protected_branches: string[] }
-  paths: { protected: string[]; read_only: string[]; no_delete: string[] }
-  audit: { enabled: boolean; path: string }
-  debug: { enabled: boolean }
+  commands: { safe: string[]; db_clients: string[]; safe_scripts: string[] };
+  git: { protected_branches: string[] };
+  paths: { protected: string[]; read_only: string[]; no_delete: string[] };
+  audit: { enabled: boolean; path: string };
+  debug: { enabled: boolean };
 }
 
 /** Default protected path patterns — always active even without config. */
@@ -27,28 +28,32 @@ export const DEFAULT_PROTECTED_PATHS = [
   "~/.gnupg/**",
   "**/*.pem",
   "**/*id_rsa*",
-]
+];
 
 /** Default read-only path patterns — reads allowed, writes/deletes blocked. */
-export const DEFAULT_READ_ONLY_PATHS = [
-  "**/.env",
-  "**/.env.*",
-]
+export const DEFAULT_READ_ONLY_PATHS = ["**/.env", "**/.env.*"];
 
 const DEFAULT_CONFIG: HallPassConfig = {
   commands: { safe: [], db_clients: [], safe_scripts: [] },
   git: { protected_branches: [] },
-  paths: { protected: DEFAULT_PROTECTED_PATHS, read_only: DEFAULT_READ_ONLY_PATHS, no_delete: [] },
-  audit: { enabled: false, path: resolve(homedir(), ".config", "hall-pass", "audit.jsonl") },
+  paths: {
+    protected: DEFAULT_PROTECTED_PATHS,
+    read_only: DEFAULT_READ_ONLY_PATHS,
+    no_delete: [],
+  },
+  audit: {
+    enabled: false,
+    path: resolve(homedir(), ".config", "hall-pass", "audit.jsonl"),
+  },
   debug: { enabled: false },
-}
+};
 
 /** Expand ~ to the user's home directory in a path string. */
 export function expandTilde(p: string): string {
   if (p.startsWith("~/") || p === "~") {
-    return resolve(homedir(), p.slice(2))
+    return resolve(homedir(), p.slice(2));
   }
-  return p
+  return p;
 }
 
 /** Expand ~ in all path values within a config. */
@@ -64,25 +69,39 @@ function expandConfigPaths(config: HallPassConfig): HallPassConfig {
       ...config.audit,
       path: expandTilde(config.audit.path),
     },
-  }
+  };
 }
 
 /** Deep-merge user config with defaults. User values ADD to defaults, not replace. */
-function mergeConfig(defaults: HallPassConfig, user: Partial<Record<string, unknown>>): HallPassConfig {
-  const commands = user.commands as Partial<Record<string, string[]>> | undefined
-  const git = user.git as Partial<Record<string, string[]>> | undefined
-  const paths = user.paths as Partial<Record<string, string[]>> | undefined
-  const audit = user.audit as Partial<Record<string, unknown>> | undefined
-  const debug = user.debug as Partial<Record<string, unknown>> | undefined
+function mergeConfig(
+  defaults: HallPassConfig,
+  user: Partial<Record<string, unknown>>,
+): HallPassConfig {
+  const commands = user.commands as
+    | Partial<Record<string, string[]>>
+    | undefined;
+  const git = user.git as Partial<Record<string, string[]>> | undefined;
+  const paths = user.paths as Partial<Record<string, string[]>> | undefined;
+  const audit = user.audit as Partial<Record<string, unknown>> | undefined;
+  const debug = user.debug as Partial<Record<string, unknown>> | undefined;
 
   return {
     commands: {
       safe: [...defaults.commands.safe, ...(commands?.safe ?? [])],
-      db_clients: [...defaults.commands.db_clients, ...(commands?.db_clients ?? [])],
-      safe_scripts: [...defaults.commands.safe_scripts, ...(commands?.safe_scripts ?? [])],
+      db_clients: [
+        ...defaults.commands.db_clients,
+        ...(commands?.db_clients ?? []),
+      ],
+      safe_scripts: [
+        ...defaults.commands.safe_scripts,
+        ...(commands?.safe_scripts ?? []),
+      ],
     },
     git: {
-      protected_branches: [...defaults.git.protected_branches, ...(git?.protected_branches ?? [])],
+      protected_branches: [
+        ...defaults.git.protected_branches,
+        ...(git?.protected_branches ?? []),
+      ],
     },
     paths: {
       protected: [...defaults.paths.protected, ...(paths?.protected ?? [])],
@@ -96,33 +115,70 @@ function mergeConfig(defaults: HallPassConfig, user: Partial<Record<string, unkn
     debug: {
       enabled: (debug?.enabled as boolean) ?? defaults.debug.enabled,
     },
-  }
+  };
 }
 
-/** Resolve the config file path. */
+/** Resolve the global config file path. */
 function getConfigPath(): string {
-  return process.env.HALL_PASS_CONFIG
-    ?? resolve(homedir(), ".config", "hall-pass", "config.toml")
+  return (
+    process.env.HALL_PASS_CONFIG ??
+    resolve(homedir(), ".config", "hall-pass", "config.toml")
+  );
 }
 
 /**
- * Load config from TOML file. Returns defaults if no file exists or on parse error.
+ * Walk up from `start` looking for a `.hall-pass` file at a directory that
+ * also contains a `.git` entry (i.e. the repo root). Returns the path to the
+ * file or `null` if not found. We anchor on `.git` so a stray `.hall-pass`
+ * outside a repo can't grant trust by accident.
+ */
+function findProjectConfig(start: string): string | null {
+  let dir = resolve(start);
+  while (true) {
+    const candidate = resolve(dir, ".hall-pass");
+    if (existsSync(candidate) && existsSync(resolve(dir, ".git"))) {
+      return candidate;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/** Parse a TOML config file. Returns null if missing or unparseable. */
+async function readTomlConfig(
+  path: string,
+): Promise<Partial<Record<string, unknown>> | null> {
+  try {
+    const file = Bun.file(path);
+    if (!(await file.exists())) return null;
+    const text = await file.text();
+    return parseTOML(text) as Partial<Record<string, unknown>>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Load config. Layered: defaults < global (~/.config/hall-pass/config.toml)
+ * < project-local (<repo-root>/.hall-pass). Project-local entries are
+ * additive — they extend the safelists rather than replacing them. The
+ * project file is anchored on a sibling `.git` entry so an unrelated
+ * `.hall-pass` outside a repo can't grant trust by accident.
  */
 export async function loadConfig(): Promise<HallPassConfig> {
-  const configPath = getConfigPath()
+  let result: HallPassConfig = DEFAULT_CONFIG;
 
-  try {
-    const file = Bun.file(configPath)
-    if (!(await file.exists())) {
-      return expandConfigPaths(DEFAULT_CONFIG)
-    }
-    const text = await file.text()
-    const parsed = parseTOML(text) as Partial<Record<string, unknown>>
-    const merged = mergeConfig(DEFAULT_CONFIG, parsed)
-    return expandConfigPaths(merged)
-  } catch {
-    return expandConfigPaths(DEFAULT_CONFIG)
+  const globalParsed = await readTomlConfig(getConfigPath());
+  if (globalParsed) result = mergeConfig(result, globalParsed);
+
+  const projectConfigPath = findProjectConfig(process.cwd());
+  if (projectConfigPath) {
+    const projectParsed = await readTomlConfig(projectConfigPath);
+    if (projectParsed) result = mergeConfig(result, projectParsed);
   }
+
+  return expandConfigPaths(result);
 }
 
 /** Generate a default config TOML string with comments. */
@@ -163,15 +219,15 @@ export function generateDefaultConfig(): string {
 [debug]
 # Enable debug output to stderr
 # enabled = true
-`
+`;
 }
 
 /** Ensure the config directory exists and write the default config. */
 export async function initConfig(): Promise<string> {
-  const configPath = getConfigPath()
-  const dir = dirname(configPath)
-  await Bun.spawn(["mkdir", "-p", dir]).exited
+  const configPath = getConfigPath();
+  const dir = dirname(configPath);
+  await Bun.spawn(["mkdir", "-p", dir]).exited;
 
-  await Bun.write(configPath, generateDefaultConfig())
-  return configPath
+  await Bun.write(configPath, generateDefaultConfig());
+  return configPath;
 }
