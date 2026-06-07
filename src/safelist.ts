@@ -90,6 +90,7 @@ export const SAFE_COMMANDS = new Set([
   "pandoc", "pdftotext", "pdftoppm", "pdfinfo",
   "qpdf", "exiftool",
   "ffmpeg", "ffprobe", "rsvg-convert",
+  "tesseract",
 
   // ── Security & certificates ──────────────────────────────────────────
   "ssh-add", "ssh-keygen",

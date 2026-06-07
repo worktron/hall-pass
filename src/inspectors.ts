@@ -196,6 +196,29 @@ export const INSPECTORS: Record<string, Inspector> = {
     return allow("find: safe")
   },
 
+  rsync: (cmdInfo) => {
+    const args = cmdInfo.args
+    // rsync is cp-equivalent for local copies, UNLESS it deletes destination
+    // files, runs a custom transport command, or touches a remote host
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
+      if (arg === "--delete" || arg === "--del" || arg.startsWith("--delete-")) {
+        return prompt("rsync: --delete", `"rsync ${arg}" removes files from the destination`)
+      }
+      if (arg === "--remove-source-files" || arg === "--remove-sent-files") {
+        return prompt("rsync: removes sources", `"rsync ${arg}" deletes source files after transfer`)
+      }
+      if (arg === "--rsh" || arg.startsWith("--rsh=") || /^-[a-zA-Z0-9]*e/.test(arg)) {
+        return prompt("rsync: custom transport", `"rsync -e/--rsh" executes an arbitrary transport command`)
+      }
+      // Remote path: rsync:// URL, or a colon before the first slash (host: / user@host:)
+      if (!arg.startsWith("-") && (arg.startsWith("rsync://") || /^[^/]*:/.test(arg))) {
+        return prompt("rsync: remote path", `rsync to/from a remote host ("${arg}") transfers files over the network`)
+      }
+    }
+    return allow("rsync: local copy")
+  },
+
   sed: (cmdInfo) => {
     // sed is safe UNLESS it uses -i (in-place editing)
     for (const arg of cmdInfo.args) {
