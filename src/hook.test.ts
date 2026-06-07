@@ -685,6 +685,30 @@ describe("new inspectors — integration", () => {
       expectPrompt(await runHook("xattr -d user.foo /tmp/file.txt"))
     })
   })
+
+  describe("rsync — local vs delete/remote", () => {
+    test("rsync -a local copy with excludes → allow", async () => {
+      expectAllow(await runHook("rsync -a --exclude=node_modules --exclude=output src/packages/ packages/"))
+    })
+
+    test("rsync -a --delete → prompt", async () => {
+      expectPrompt(await runHook("rsync -a --delete src/ dest/"))
+    })
+
+    test("rsync to remote host → prompt", async () => {
+      expectPrompt(await runHook("rsync -a src/ user@host:/backup"))
+    })
+
+    test("rsync -e ssh → prompt", async () => {
+      expectPrompt(await runHook("rsync -e ssh src/ dest/"))
+    })
+  })
+
+  describe("tesseract — safelisted", () => {
+    test("tesseract image to stdout → allow", async () => {
+      expectAllow(await runHook("tesseract osc-2.png -"))
+    })
+  })
 })
 
 describe("Write/Edit secret detection", () => {

@@ -171,6 +171,68 @@ describe("evaluateBashCommand", () => {
     })
   })
 
+  describe("rsync", () => {
+    test("rsync -a src/ dest/ → allow", () => {
+      expectAllow(cmd("rsync", "-a", "src/", "dest/"))
+    })
+
+    test("rsync -avz --exclude=node_modules src/ dest/ → allow", () => {
+      expectAllow(cmd("rsync", "-avz", "--exclude=node_modules", "src/", "dest/"))
+    })
+
+    test("rsync -a --exclude node_modules --exclude output src/ dest/ → allow", () => {
+      expectAllow(cmd("rsync", "-a", "--exclude", "node_modules", "--exclude", "output", "src/", "dest/"))
+    })
+
+    test("rsync -n --dry-run src/ dest/ → allow", () => {
+      expectAllow(cmd("rsync", "-n", "--dry-run", "src/", "dest/"))
+    })
+
+    test("rsync -a --delete src/ dest/ → prompt", () => {
+      expectPrompt(cmd("rsync", "-a", "--delete", "src/", "dest/"))
+    })
+
+    test("rsync -a --delete-after src/ dest/ → prompt", () => {
+      expectPrompt(cmd("rsync", "-a", "--delete-after", "src/", "dest/"))
+    })
+
+    test("rsync -a --del src/ dest/ → prompt", () => {
+      expectPrompt(cmd("rsync", "-a", "--del", "src/", "dest/"))
+    })
+
+    test("rsync --remove-source-files src/ dest/ → prompt", () => {
+      expectPrompt(cmd("rsync", "--remove-source-files", "src/", "dest/"))
+    })
+
+    test("rsync -e ssh src/ dest/ → prompt (custom transport)", () => {
+      expectPrompt(cmd("rsync", "-e", "ssh", "src/", "dest/"))
+    })
+
+    test("rsync -avze ssh src/ dest/ → prompt (e in short cluster)", () => {
+      expectPrompt(cmd("rsync", "-avze", "ssh", "src/", "dest/"))
+    })
+
+    test("rsync --rsh=ssh src/ dest/ → prompt", () => {
+      expectPrompt(cmd("rsync", "--rsh=ssh", "src/", "dest/"))
+    })
+
+    test("rsync -a src/ host:/backup → prompt (remote dest)", () => {
+      expectPrompt(cmd("rsync", "-a", "src/", "host:/backup"))
+    })
+
+    test("rsync -a user@host:src/ dest/ → prompt (remote source)", () => {
+      expectPrompt(cmd("rsync", "-a", "user@host:src/", "dest/"))
+    })
+
+    test("rsync -a rsync://host/module dest/ → prompt (rsync URL)", () => {
+      expectPrompt(cmd("rsync", "-a", "rsync://host/module", "dest/"))
+    })
+
+    test("rsync -a ./src:colon/ dest/ → allow (colon after slash is local)", () => {
+      expectAllow(cmd("rsync", "-a", "./src:colon/", "dest/"))
+    })
+  })
+
   describe("sed", () => {
     test("sed 's/foo/bar/' file → allow", () => {
       expectAllow(cmd("sed", "s/foo/bar/", "file.txt"))
@@ -414,6 +476,9 @@ describe("evaluateBashCommand", () => {
 
     // File operations
     test("ln -s source target → allow", () => expectAllow(cmd("ln", "-s", "source", "target")))
+
+    // Document & media processing
+    test("tesseract osc-2.png - → allow", () => expectAllow(cmd("tesseract", "osc-2.png", "-")))
 
     // File & data inspection
     test("md5 file.bin → allow", () => expectAllow(cmd("md5", "file.bin")))
