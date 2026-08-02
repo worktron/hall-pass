@@ -62,9 +62,17 @@ Configurable protection levels:
 - **read_only** — allows reads, blocks writes and deletes
 - **no_delete** — allows reads and writes, blocks deletes
 
-### Layer 5: Audit logging
+### Layer 5: Audit logging + outcome monitoring
 
-Optional JSON Lines audit log records every decision with timestamp, tool, input, decision, reason, and which layer made the call.
+A JSON Lines audit log (on by default, capped at ~5MB) records every decision with timestamp, tool, input, decision, reason, and which layer made the call. Each entry also carries the session, permission mode, and `tool_use_id` from Claude Code.
+
+Two observe-only hooks close the loop: a PostToolUse hook records when a tool call actually ran (same `tool_use_id` as its decision), and a Notification hook records when Claude Code shows a native permission prompt. Joining decisions to completions tells you whether the user approved each prompt hall-pass raised:
+
+```bash
+bun run stats   # decision mix, approval rate per prompt reason, safelist gap candidates
+```
+
+A prompt reason that is always approved is a safelist gap; one that is frequently declined is earning its keep. ("Not run" conflates user-denied with interrupted — Claude Code has no hook that reports the user's actual choice.)
 
 ## Setup
 
@@ -135,7 +143,7 @@ read_only = ["**/config/prod/**"]
 no_delete = ["**/migrations/**"]
 
 [audit]
-# Enable audit logging
+# Audit logging is on by default; set false to disable
 enabled = true
 # Log file path (default: ~/.config/hall-pass/audit.jsonl)
 path = "~/.config/hall-pass/audit.jsonl"

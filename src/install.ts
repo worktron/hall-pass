@@ -3,9 +3,11 @@
 /**
  * hall-pass install
  *
- * Sets up the PreToolUse hook in Claude Code's settings:
+ * Sets up the hall-pass hooks in Claude Code's settings:
  * 1. Checks that shfmt is installed
- * 2. Adds hook registrations for Bash, Write, and Edit tools
+ * 2. Adds PreToolUse (decisions) + PostToolUse (outcome monitoring) hooks for
+ *    Bash, Write, and Edit, and a Notification hook for permission_prompt
+ *    (records when a native permission prompt is shown)
  * 3. Adds non-Bash tool permissions (Read, Edit, Glob, Grep, WebFetch, WebSearch)
  */
 
@@ -87,14 +89,15 @@ for (const tool of NON_BASH_TOOLS) {
 permissions.allow = [...allow]
 settings.permissions = permissions
 
-// -- Add hook registrations for Bash, Write, and Edit --
+// -- Add hook registrations --
 
 const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>
-const preToolUse = (hooks.PreToolUse ?? []) as Array<Record<string, unknown>>
 
-for (const matcher of HOOK_MATCHERS) {
+function registerHook(eventName: string, matcher: string) {
+  const entries = (hooks[eventName] ?? []) as Array<Record<string, unknown>>
+
   // Check if hall-pass is already registered for this matcher
-  const existing = preToolUse.find((entry) => {
+  const existing = entries.find((entry) => {
     if (entry.matcher !== matcher) return false
     const entryHooks = entry.hooks as Array<Record<string, unknown>> | undefined
     return entryHooks?.some((h) => {
@@ -108,17 +111,24 @@ for (const matcher of HOOK_MATCHERS) {
     const entryHooks = existing.hooks as Array<Record<string, unknown>>
     const hookEntry = entryHooks.find((h) => (h.command as string)?.includes("hall-pass"))
     if (hookEntry) hookEntry.command = HOOK_COMMAND
-    console.log(`Updated existing hall-pass hook for ${matcher}`)
+    console.log(`Updated existing hall-pass ${eventName} hook for ${matcher}`)
   } else {
-    preToolUse.push({
+    entries.push({
       matcher,
       hooks: [{ type: "command", command: HOOK_COMMAND }],
     })
-    console.log(`Added hall-pass hook for ${matcher}`)
+    console.log(`Added hall-pass ${eventName} hook for ${matcher}`)
   }
+
+  hooks[eventName] = entries
 }
 
-hooks.PreToolUse = preToolUse
+for (const matcher of HOOK_MATCHERS) {
+  registerHook("PreToolUse", matcher)
+  registerHook("PostToolUse", matcher)
+}
+registerHook("Notification", "permission_prompt")
+
 settings.hooks = hooks
 
 // -- Optionally generate config --

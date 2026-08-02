@@ -3,7 +3,8 @@
 /**
  * hall-pass uninstall
  *
- * Removes the PreToolUse hook from Claude Code's settings.
+ * Removes all hall-pass hooks (PreToolUse, PostToolUse, Notification)
+ * from Claude Code's settings.
  * Does not remove non-Bash tool permissions (you probably still want those).
  */
 
@@ -28,25 +29,31 @@ try {
 }
 
 const hooks = settings.hooks as Record<string, unknown[]> | undefined
-if (!hooks?.PreToolUse) {
-  console.log("No PreToolUse hooks found. Nothing to remove.")
+if (!hooks || Object.keys(hooks).length === 0) {
+  console.log("No hooks found. Nothing to remove.")
   process.exit(0)
 }
 
-const before = hooks.PreToolUse.length
-hooks.PreToolUse = hooks.PreToolUse.filter((entry) => {
-  const e = entry as Record<string, unknown>
-  const entryHooks = e.hooks as Array<Record<string, unknown>> | undefined
-  return !entryHooks?.some((h) => (h.command as string)?.includes("hall-pass"))
-})
+let removed = 0
+for (const eventName of Object.keys(hooks)) {
+  const entries = hooks[eventName]
+  if (!Array.isArray(entries)) continue
+  const kept = entries.filter((entry) => {
+    const e = entry as Record<string, unknown>
+    const entryHooks = e.hooks as Array<Record<string, unknown>> | undefined
+    return !entryHooks?.some((h) => (h.command as string)?.includes("hall-pass"))
+  })
+  removed += entries.length - kept.length
+  if (kept.length === 0) delete hooks[eventName]
+  else hooks[eventName] = kept
+}
 
-if (hooks.PreToolUse.length === before) {
+if (removed === 0) {
   console.log("hall-pass hook not found in settings. Nothing to remove.")
   process.exit(0)
 }
 
 // Clean up empty hooks object
-if (hooks.PreToolUse.length === 0) delete hooks.PreToolUse
 if (Object.keys(hooks).length === 0) delete settings.hooks
 
 await Bun.write(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n")

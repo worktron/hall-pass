@@ -14,7 +14,7 @@ interface HookResult {
 const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
 const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
 const noopDebug: DebugFn = () => {}
-const noopAudit: AuditLogger = { log: () => {} }
+const noopAudit: AuditLogger = { log: () => {}, event: () => {} }
 
 let _config: HallPassConfig | undefined
 async function getConfig(): Promise<HallPassConfig> {

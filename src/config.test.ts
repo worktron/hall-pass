@@ -31,7 +31,7 @@ describe("config", () => {
     expect(config.commands.safe).toEqual([]);
     expect(config.commands.db_clients).toEqual([]);
     expect(config.git.protected_branches).toEqual([]);
-    expect(config.audit.enabled).toBe(false);
+    expect(config.audit.enabled).toBe(true);
     expect(config.debug.enabled).toBe(false);
     // Default protected paths should have ~ expanded
     expect(config.paths.protected.length).toBeGreaterThan(0);
@@ -144,7 +144,7 @@ path = "~/logs/audit.jsonl"
     const config = await loadConfig();
 
     expect(config.commands.safe).toEqual([]);
-    expect(config.audit.enabled).toBe(false);
+    expect(config.audit.enabled).toBe(true);
   });
 
   test("HALL_PASS_CONFIG env var overrides default path", async () => {
