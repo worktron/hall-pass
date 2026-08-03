@@ -20,6 +20,7 @@
     "uninstall": "bun src/uninstall.ts",
     "test": "bun test",
     "stats": "bun src/stats.ts",
+    "eval": "bun src/eval.ts",
     "typecheck": "bun build src/hook.ts --no-bundle --no-emit"
   },
   "repository": {

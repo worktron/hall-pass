@@ -70,7 +70,10 @@ Two observe-only hooks close the loop: a PostToolUse hook records when a tool ca
 
 ```bash
 bun run stats   # decision mix, approval rate per prompt reason, safelist gap candidates
+bun run eval    # replay recorded traffic through the current decide() and diff
 ```
+
+`eval` turns the audit log into a labeled regression corpus for policy changes: edit the safelist/inspectors (or point `HALL_PASS_CONFIG` at a candidate config), replay every recorded decision, and see exactly which real prompts disappear (wins), which allows start prompting (regressions), and — the failure condition — whether any prompt the user did NOT approve would now auto-allow (exit 1). On an unchanged working tree the diff is empty.
 
 A prompt reason that is always approved is a safelist gap; one that is frequently declined is earning its keep. ("Not run" conflates user-denied with interrupted — Claude Code has no hook that reports the user's actual choice.)
 
