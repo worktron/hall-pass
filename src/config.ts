@@ -42,7 +42,9 @@ const DEFAULT_CONFIG: HallPassConfig = {
     no_delete: [],
   },
   audit: {
-    enabled: false,
+    // On by default: decision + outcome entries power `bun run stats`
+    // and `bun run eval`. Rotates past ~5MB (archives kept), see audit.ts.
+    enabled: true,
     path: resolve(homedir(), ".config", "hall-pass", "audit.jsonl"),
   },
   debug: { enabled: false },
@@ -211,8 +213,10 @@ export function generateDefaultConfig(): string {
 # no_delete = ["**/migrations/**"]
 
 [audit]
-# Enable audit logging
-# enabled = true
+# Audit logging is ON by default — it records decisions and outcomes
+# (JSON Lines, rotated past ~5MB with archives kept) and powers
+# \`bun run stats\` and \`bun run eval\`.
+# enabled = false
 # Audit log file path (default: ~/.config/hall-pass/audit.jsonl)
 # path = "~/.config/hall-pass/audit.jsonl"
 

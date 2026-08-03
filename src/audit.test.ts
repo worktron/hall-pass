@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { createAudit } from "./audit.ts"
+import { createAudit, readAuditLog, AUDIT_MAX_BYTES } from "./audit.ts"
+import { readdirSync, writeFileSync } from "fs"
 import type { HallPassConfig } from "./config.ts"
 import { resolve } from "path"
 import { mkdtemp, rm } from "fs/promises"
@@ -111,6 +112,116 @@ describe("audit", () => {
     expect(entry.reason).toBe("matches protected path **/.env")
     expect(entry.layer).toBe("paths")
     expect(typeof entry.ts).toBe("string")
+  })
+
+  test("writes are synchronous — entry on disk immediately (survives process.exit)", async () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    const audit = createAudit(makeConfig(true, auditPath))
+
+    audit.log({
+      tool: "Bash",
+      input: "git status",
+      decision: "allow",
+      reason: "safelist",
+      layer: "safelist",
+    })
+
+    // No sleep: the hook calls process.exit() right after deciding, so the
+    // entry must already be on disk here.
+    const entry = JSON.parse((await Bun.file(auditPath).text()).trim())
+    expect(entry.decision).toBe("allow")
+  })
+
+  test("stamps context (session, tool_use_id, mode) onto decision entries", async () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    const audit = createAudit(makeConfig(true, auditPath), {
+      session: "sess_1",
+      tool_use_id: "toolu_1",
+      mode: "acceptEdits",
+    })
+
+    audit.log({
+      tool: "Bash",
+      input: "rm -rf build",
+      decision: "prompt",
+      reason: "dangerous: rm",
+      layer: "evaluate",
+    })
+
+    const entry = JSON.parse((await Bun.file(auditPath).text()).trim())
+    expect(entry.event).toBe("decision")
+    expect(entry.session).toBe("sess_1")
+    expect(entry.tool_use_id).toBe("toolu_1")
+    expect(entry.mode).toBe("acceptEdits")
+  })
+
+  test("event() writes completed and native-prompt entries", async () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    const audit = createAudit(makeConfig(true, auditPath), { tool_use_id: "toolu_2" })
+
+    audit.event("completed", { tool: "Bash" })
+    audit.event("native-prompt", { message: "Permission needed to run: Bash(npm test)" })
+
+    const lines = (await Bun.file(auditPath).text()).trim().split("\n")
+    expect(lines.length).toBe(2)
+
+    const completed = JSON.parse(lines[0]!)
+    expect(completed.event).toBe("completed")
+    expect(completed.tool).toBe("Bash")
+    expect(completed.tool_use_id).toBe("toolu_2")
+
+    const prompt = JSON.parse(lines[1]!)
+    expect(prompt.event).toBe("native-prompt")
+    expect(prompt.message).toContain("npm test")
+  })
+
+  test("event() is a no-op when disabled", async () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    const audit = createAudit(makeConfig(false, auditPath))
+    audit.event("completed", { tool: "Bash" })
+    expect(await Bun.file(auditPath).exists()).toBe(false)
+  })
+
+  test("rotates an oversized log to a timestamped archive instead of trimming", async () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    const oldLine = JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", event: "decision" }) + "\n"
+    writeFileSync(auditPath, oldLine + "x".repeat(AUDIT_MAX_BYTES + 1024) + "\n")
+
+    const audit = createAudit(makeConfig(true, auditPath))
+    audit.log({
+      tool: "Bash",
+      input: "echo fresh",
+      decision: "allow",
+      reason: "safelist",
+      layer: "safelist",
+    })
+
+    const archives = readdirSync(tmpDir).filter((f) => f.startsWith("audit.jsonl."))
+    expect(archives.length).toBe(1)
+
+    // Fresh live log holds only the new entry; the old content is archived intact.
+    const live = (await Bun.file(auditPath).text()).trim().split("\n")
+    expect(live.length).toBe(1)
+    expect(JSON.parse(live[0]!).input).toBe("echo fresh")
+    const archived = await Bun.file(resolve(tmpDir, archives[0]!)).text()
+    expect(archived.startsWith(oldLine)).toBe(true)
+  })
+
+  test("readAuditLog merges archives (oldest first) with the live log", async () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    const line = (input: string) =>
+      JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", event: "decision", tool: "Bash", input }) + "\n"
+
+    writeFileSync(resolve(tmpDir, "audit.jsonl.2026-06-01T00-00-00-000Z"), line("oldest"))
+    writeFileSync(resolve(tmpDir, "audit.jsonl.2026-07-01T00-00-00-000Z"), line("middle") + "not json\n")
+    writeFileSync(auditPath, line("live"))
+
+    const entries = readAuditLog(auditPath)
+    expect(entries.map((e) => e.input)).toEqual(["oldest", "middle", "live"])
+  })
+
+  test("readAuditLog returns empty for a missing log", () => {
+    expect(readAuditLog(resolve(tmpDir, "nope", "audit.jsonl"))).toEqual([])
   })
 
   test("handles missing directory (creates it)", async () => {

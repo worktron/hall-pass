@@ -1,6 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { resolve } from "path"
-import { existsSync } from "fs"
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "fs"
+import { tmpdir } from "os"
 import { decide, type HookDecision } from "./decide.ts"
 import { loadConfig, type HallPassConfig } from "./config.ts"
 import type { DebugFn } from "./debug.ts"
@@ -18,7 +19,7 @@ const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
 const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
 
 const noopDebug: DebugFn = () => {}
-const noopAudit: AuditLogger = { log: () => {} }
+const noopAudit: AuditLogger = { log: () => {}, event: () => {} }
 
 let _config: HallPassConfig | undefined
 async function getConfig(): Promise<HallPassConfig> {
@@ -51,16 +52,40 @@ async function runHookForTool(toolName: string, toolInput: Record<string, unknow
   return toResult(d)
 }
 
+// Spawned hooks load the real user config, and audit is on by default — point
+// them at a scratch config so smoke tests never write the user's audit log.
+const smokeDir = mkdtempSync(resolve(tmpdir(), "hall-pass-smoke-"))
+const smokeConfigPath = resolve(smokeDir, "config.toml")
+const smokeAuditPath = resolve(smokeDir, "audit.jsonl")
+writeFileSync(smokeConfigPath, `[audit]\nenabled = true\npath = "${smokeAuditPath}"\n`)
+
 /** Spawn the real hook binary end-to-end (stdin → stdout → exit). Used by smoke tests. */
-async function spawnHook(toolName: string, toolInput: Record<string, unknown>): Promise<HookResult> {
-  const input = JSON.stringify({ tool_name: toolName, tool_input: toolInput })
-  const proc = Bun.spawn(["bun", HOOK_PATH], { stdin: new Response(input), stdout: "pipe", stderr: "pipe" })
+async function spawnHook(
+  toolName: string,
+  toolInput: Record<string, unknown>,
+  extraFields: Record<string, unknown> = {},
+): Promise<HookResult> {
+  const input = JSON.stringify({ tool_name: toolName, tool_input: toolInput, ...extraFields })
+  const proc = Bun.spawn(["bun", HOOK_PATH], {
+    stdin: new Response(input),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, HALL_PASS_CONFIG: smokeConfigPath },
+  })
   const [stdout, stderr] = await Promise.all([
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ])
   await proc.exited
   return { exitCode: proc.exitCode ?? 1, stdout, stderr }
+}
+
+function readSmokeAudit(): Array<Record<string, unknown>> {
+  if (!existsSync(smokeAuditPath)) return []
+  return readFileSync(smokeAuditPath, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
 }
 
 /** Check that the hook allowed (exit 0 + permissionDecision: "allow" on stdout) */
@@ -784,5 +809,50 @@ describe("end-to-end binary (real spawn)", () => {
 
   test("Write to protected path (*.pem) → exit 0 + ask JSON", async () => {
     expectPrompt(await spawnHook("Write", { file_path: "/tmp/secret.pem", content: "x" }))
+  })
+
+  test("decision audit entry carries tool_use_id / session / mode", async () => {
+    const result = await spawnHook("Bash", { command: "git push origin main" }, {
+      hook_event_name: "PreToolUse",
+      tool_use_id: "toolu_smoke_decision",
+      session_id: "sess_smoke",
+      permission_mode: "acceptEdits",
+    })
+    expectPrompt(result)
+    const entry = readSmokeAudit().find((e) => e.tool_use_id === "toolu_smoke_decision")
+    expect(entry).toBeDefined()
+    expect(entry!.event).toBe("decision")
+    expect(entry!.decision).toBe("prompt")
+    expect(entry!.session).toBe("sess_smoke")
+    expect(entry!.mode).toBe("acceptEdits")
+  })
+
+  test("PostToolUse → exit 0, no output, completed audit entry", async () => {
+    const result = await spawnHook("Bash", { command: "git push origin main" }, {
+      hook_event_name: "PostToolUse",
+      tool_use_id: "toolu_smoke_completed",
+      session_id: "sess_smoke",
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
+    const entry = readSmokeAudit().find((e) => e.tool_use_id === "toolu_smoke_completed")
+    expect(entry).toBeDefined()
+    expect(entry!.event).toBe("completed")
+    expect(entry!.tool).toBe("Bash")
+  })
+
+  test("Notification → exit 0, no output, native-prompt audit entry", async () => {
+    const result = await spawnHook("", {}, {
+      hook_event_name: "Notification",
+      notification_type: "permission_prompt",
+      message: "Permission needed to run: Bash(rm -rf build)",
+      session_id: "sess_smoke_notif",
+    })
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toBe("")
+    const entry = readSmokeAudit().find((e) => e.session === "sess_smoke_notif")
+    expect(entry).toBeDefined()
+    expect(entry!.event).toBe("native-prompt")
+    expect(entry!.message).toBe("Permission needed to run: Bash(rm -rf build)")
   })
 })

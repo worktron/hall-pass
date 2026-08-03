@@ -1,22 +1,28 @@
 #!/usr/bin/env bun
 
 /**
- * hall-pass: PreToolUse hook for Claude Code
+ * hall-pass: Claude Code hook entry point
  *
- * Thin entry point: read the tool invocation from stdin, delegate the decision
- * to decide() (src/decide.ts), then emit the permissionDecision JSON and exit.
- * The decision logic lives in decide.ts so it can be tested in-process.
+ * PreToolUse (the main path): read the tool invocation from stdin, delegate
+ * the decision to decide() (src/decide.ts), then emit the permissionDecision
+ * JSON and exit. The decision logic lives in decide.ts so it can be tested
+ * in-process.
  *
  * Decision protocol (all exit 0 + JSON on stdout):
  *   { permissionDecision: "allow" }                     = auto-approve
  *   { permissionDecision: "allow", additionalContext }  = auto-approve + nudge Claude
  *   { permissionDecision: "ask" }                       = prompt user for permission
  *   (no output)                                         = step aside, let Claude Code decide
+ *
+ * Also handles two observe-only events for outcome monitoring (no decision,
+ * just an audit entry — see audit.ts / stats.ts):
+ *   PostToolUse  = the tool call ran; joined to its decision via tool_use_id
+ *   Notification = a native permission prompt was shown (permission_prompt)
  */
 
 import { loadConfig } from "./config.ts"
 import { createDebug } from "./debug.ts"
-import { createAudit } from "./audit.ts"
+import { createAudit, type AuditContext } from "./audit.ts"
 import { decide, findShfmt, type HookDecision } from "./decide.ts"
 
 // Diagnostic log — always writes to /tmp so we can debug hook failures.
@@ -74,24 +80,44 @@ function emit(decision: HookDecision): never {
 diag("start")
 let toolName: string
 let toolInput: Record<string, unknown>
+let hookEvent: string
+let ctx: AuditContext
 try {
   const input = await Bun.stdin.text()
   const parsed = JSON.parse(input)
   toolName = parsed?.tool_name ?? ""
   toolInput = parsed?.tool_input ?? {}
+  hookEvent = parsed?.hook_event_name ?? "PreToolUse"
+  ctx = {
+    session: parsed?.session_id,
+    tool_use_id: parsed?.tool_use_id,
+    mode: parsed?.permission_mode,
+  }
+  // Observe-only events: log the outcome and step aside.
+  if (hookEvent === "PostToolUse") {
+    diag(`COMPLETED tool=${toolName} id=${ctx.tool_use_id ?? "?"}`)
+    createAudit(await loadConfig(), ctx).event("completed", { tool: toolName })
+    process.exit(0)
+  }
+  if (hookEvent === "Notification") {
+    const message = (parsed?.message as string) ?? ""
+    diag(`NATIVE-PROMPT ${message.slice(0, 120)}`)
+    createAudit(await loadConfig(), ctx).event("native-prompt", { message })
+    process.exit(0)
+  }
 } catch (e) {
   diag(`stdin-error: ${e}`)
   process.exit(1)
 }
 
 const command = (toolInput.command as string) ?? ""
-diag(`tool=${toolName} cmd=${command.slice(0, 80)} keys=${Object.keys(toolInput).join(",")}`)
+diag(`tool=${toolName} cmd=${command.slice(0, 80)} keys=${Object.keys(toolInput).join(",")} mode=${ctx.mode ?? "?"} id=${ctx.tool_use_id ?? "?"}`)
 
 // -- Load config, wire up debug/audit, decide, emit --
 
 const config = await loadConfig()
 const debug = createDebug(config)
-const audit = createAudit(config)
+const audit = createAudit(config, ctx)
 const shfmtBin = findShfmt()
 
 const decision = await decide(toolName, toolInput, { config, shfmtBin, debug, audit })
