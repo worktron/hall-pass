@@ -64,7 +64,7 @@ Configurable protection levels:
 
 ### Layer 5: Audit logging + outcome monitoring
 
-A JSON Lines audit log (on by default, capped at ~5MB) records every decision with timestamp, tool, input, decision, reason, and which layer made the call. Each entry also carries the session, permission mode, and `tool_use_id` from Claude Code.
+A JSON Lines audit log (on by default; past ~5MB it rotates to timestamped archives that `stats`/`eval` still read) records every decision with timestamp, tool, input, decision, reason, and which layer made the call. Each entry also carries the session, permission mode, and `tool_use_id` from Claude Code.
 
 Two observe-only hooks close the loop: a PostToolUse hook records when a tool call actually ran (same `tool_use_id` as its decision), and a Notification hook records when Claude Code shows a native permission prompt. Joining decisions to completions tells you whether the user approved each prompt hall-pass raised:
 

@@ -11,14 +11,16 @@
  *
  * Writes are synchronous: the hook process calls process.exit() right after
  * emitting its decision, which would kill an in-flight async write.
+ *
+ * Past ~5MB the live log rotates to `<path>.<timestamp>` — archives are
+ * never deleted, and readAuditLog() reads archives + live as one corpus.
  */
 
 import type { HallPassConfig } from "./config.ts"
-import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from "fs"
-import { dirname } from "path"
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync } from "fs"
+import { basename, dirname, resolve } from "path"
 
-const AUDIT_MAX_BYTES = 5_000_000
-const AUDIT_KEEP_LINES = 20_000
+export const AUDIT_MAX_BYTES = 5_000_000
 
 /** Per-invocation context from the hook's stdin, stamped onto every entry. */
 export interface AuditContext {
@@ -53,6 +55,40 @@ export interface AuditLogger {
   event(event: "completed" | "native-prompt", fields?: Partial<AuditEntry>): void
 }
 
+/**
+ * Read every audit entry: rotated archives (oldest first — timestamp
+ * suffixes sort lexically) followed by the live log. Missing files and
+ * malformed lines are skipped.
+ */
+export function readAuditLog(path: string): AuditEntry[] {
+  const base = basename(path)
+  let files: string[] = []
+  try {
+    files = readdirSync(dirname(path))
+      .filter((f) => f.startsWith(`${base}.`))
+      .sort()
+      .map((f) => resolve(dirname(path), f))
+  } catch {}
+  files.push(path)
+
+  const entries: AuditEntry[] = []
+  for (const file of files) {
+    let text: string
+    try {
+      text = readFileSync(file, "utf8")
+    } catch {
+      continue
+    }
+    for (const line of text.split("\n")) {
+      if (!line) continue
+      try {
+        entries.push(JSON.parse(line))
+      } catch {}
+    }
+  }
+  return entries
+}
+
 export function createAudit(config: HallPassConfig, ctx: AuditContext = {}): AuditLogger {
   if (!config.audit.enabled) {
     return { log() {}, event() {} }
@@ -67,12 +103,12 @@ export function createAudit(config: HallPassConfig, ctx: AuditContext = {}): Aud
         prepared = true
         mkdirSync(dirname(config.audit.path), { recursive: true })
         try {
+          // Rotate rather than trim: the log is the eval corpus (see
+          // eval.ts), so history archives instead of evaporating. Rename
+          // is atomic; a concurrent writer just starts the fresh file.
           if (statSync(config.audit.path).size > AUDIT_MAX_BYTES) {
-            const tail = readFileSync(config.audit.path, "utf8")
-              .split("\n")
-              .slice(-AUDIT_KEEP_LINES)
-              .join("\n")
-            writeFileSync(config.audit.path, tail)
+            const stamp = new Date().toISOString().replace(/[:.]/g, "-")
+            renameSync(config.audit.path, `${config.audit.path}.${stamp}`)
           }
         } catch {}
       }

@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { createAudit } from "./audit.ts"
+import { createAudit, readAuditLog, AUDIT_MAX_BYTES } from "./audit.ts"
+import { readdirSync, writeFileSync } from "fs"
 import type { HallPassConfig } from "./config.ts"
 import { resolve } from "path"
 import { mkdtemp, rm } from "fs/promises"
@@ -179,6 +180,48 @@ describe("audit", () => {
     const audit = createAudit(makeConfig(false, auditPath))
     audit.event("completed", { tool: "Bash" })
     expect(await Bun.file(auditPath).exists()).toBe(false)
+  })
+
+  test("rotates an oversized log to a timestamped archive instead of trimming", async () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    const oldLine = JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", event: "decision" }) + "\n"
+    writeFileSync(auditPath, oldLine + "x".repeat(AUDIT_MAX_BYTES + 1024) + "\n")
+
+    const audit = createAudit(makeConfig(true, auditPath))
+    audit.log({
+      tool: "Bash",
+      input: "echo fresh",
+      decision: "allow",
+      reason: "safelist",
+      layer: "safelist",
+    })
+
+    const archives = readdirSync(tmpDir).filter((f) => f.startsWith("audit.jsonl."))
+    expect(archives.length).toBe(1)
+
+    // Fresh live log holds only the new entry; the old content is archived intact.
+    const live = (await Bun.file(auditPath).text()).trim().split("\n")
+    expect(live.length).toBe(1)
+    expect(JSON.parse(live[0]!).input).toBe("echo fresh")
+    const archived = await Bun.file(resolve(tmpDir, archives[0]!)).text()
+    expect(archived.startsWith(oldLine)).toBe(true)
+  })
+
+  test("readAuditLog merges archives (oldest first) with the live log", async () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    const line = (input: string) =>
+      JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", event: "decision", tool: "Bash", input }) + "\n"
+
+    writeFileSync(resolve(tmpDir, "audit.jsonl.2026-06-01T00-00-00-000Z"), line("oldest"))
+    writeFileSync(resolve(tmpDir, "audit.jsonl.2026-07-01T00-00-00-000Z"), line("middle") + "not json\n")
+    writeFileSync(auditPath, line("live"))
+
+    const entries = readAuditLog(auditPath)
+    expect(entries.map((e) => e.input)).toEqual(["oldest", "middle", "live"])
+  })
+
+  test("readAuditLog returns empty for a missing log", () => {
+    expect(readAuditLog(resolve(tmpDir, "nope", "audit.jsonl"))).toEqual([])
   })
 
   test("handles missing directory (creates it)", async () => {

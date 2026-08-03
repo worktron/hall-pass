@@ -43,7 +43,7 @@ const DEFAULT_CONFIG: HallPassConfig = {
   },
   audit: {
     // On by default: decision + outcome entries power `bun run stats`
-    // (approval rate per prompt reason). Capped at ~5MB, see audit.ts.
+    // and `bun run eval`. Rotates past ~5MB (archives kept), see audit.ts.
     enabled: true,
     path: resolve(homedir(), ".config", "hall-pass", "audit.jsonl"),
   },
@@ -214,7 +214,8 @@ export function generateDefaultConfig(): string {
 
 [audit]
 # Audit logging is ON by default — it records decisions and outcomes
-# (JSON Lines, capped at ~5MB) and powers \`bun run stats\`.
+# (JSON Lines, rotated past ~5MB with archives kept) and powers
+# \`bun run stats\` and \`bun run eval\`.
 # enabled = false
 # Audit log file path (default: ~/.config/hall-pass/audit.jsonl)
 # path = "~/.config/hall-pass/audit.jsonl"

@@ -15,30 +15,20 @@
  */
 
 import { loadConfig } from "./config.ts"
-import type { AuditEntry } from "./audit.ts"
+import { readAuditLog } from "./audit.ts"
 
 const GAP_MIN_SAMPLES = 3
 
 const config = await loadConfig()
 const path = process.argv[2] ?? config.audit.path
 
-const file = Bun.file(path)
-if (!(await file.exists())) {
+// Includes rotated archives (<path>.<timestamp>) — the full corpus.
+const entries = readAuditLog(path)
+if (entries.length === 0) {
   console.error(`No audit log at ${path}`)
   console.error(`Audit logging writes it as you work (audit.enabled in config).`)
   process.exit(1)
 }
-
-const entries: AuditEntry[] = (await file.text())
-  .split("\n")
-  .filter(Boolean)
-  .flatMap((line) => {
-    try {
-      return [JSON.parse(line) as AuditEntry]
-    } catch {
-      return []
-    }
-  })
 
 // Older entries (pre-outcome-monitoring) lack an event field: treat as decisions.
 const decisions = entries.filter((e) => (e.event ?? "decision") === "decision")
