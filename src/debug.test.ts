@@ -5,7 +5,7 @@ import type { HallPassConfig } from "./config.ts"
 function makeConfig(debugEnabled: boolean): HallPassConfig {
   return {
     commands: { safe: [], db_clients: [], safe_scripts: [] },
-    git: { protected_branches: [] },
+    git: { protected_branches: [], safe_subcommands: [] },
     paths: { protected: [], read_only: [], no_delete: [] },
     audit: { enabled: false, path: "/tmp/audit.jsonl" },
     debug: { enabled: debugEnabled },

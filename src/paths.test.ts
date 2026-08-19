@@ -8,7 +8,7 @@ import { resolve } from "path"
 function makeConfig(overrides: Partial<HallPassConfig["paths"]> = {}): HallPassConfig {
   return {
     commands: { safe: [], db_clients: [], safe_scripts: [] },
-    git: { protected_branches: [] },
+    git: { protected_branches: [], safe_subcommands: [] },
     paths: {
       protected: overrides.protected ?? [],
       read_only: overrides.read_only ?? [],

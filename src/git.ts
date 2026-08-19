@@ -142,7 +142,11 @@ function parseGitCommand(args: string[]): { subcommand: string; flags: string[];
 const safe: GitDecision = { safe: true }
 const unsafe = (reason: string, message: string): GitDecision => ({ safe: false, reason, message })
 
-export function checkGitCommand(argsOrCommand: string[] | string, customProtectedBranches?: Set<string>): GitDecision {
+export function checkGitCommand(
+  argsOrCommand: string[] | string,
+  customProtectedBranches?: Set<string>,
+  customSafeSubcommands?: Set<string>,
+): GitDecision {
   const args = typeof argsOrCommand === "string"
     ? tokenize(argsOrCommand)
     : [...argsOrCommand]
@@ -194,6 +198,22 @@ export function checkGitCommand(argsOrCommand: string[] | string, customProtecte
     return safe
   }
 
+  // git symbolic-ref — reading a symbolic ref is safe, repointing one is not.
+  // Read:  git symbolic-ref refs/remotes/origin/HEAD  (one ref arg)
+  // Write: git symbolic-ref HEAD refs/heads/foo       (two args, repoints HEAD)
+  if (subcommand === "symbolic-ref") {
+    const deleteFlags = new Set(["--delete", "-d"])
+    for (const flag of flags) {
+      if (deleteFlags.has(flag)) {
+        return unsafe(`git: symbolic-ref ${flag}`, `git symbolic-ref ${flag} deletes a symbolic ref`)
+      }
+    }
+    if (rest.length >= 2) {
+      return unsafe("git: symbolic-ref write", `git symbolic-ref repoints "${rest[0]}" to "${rest[1]}"`)
+    }
+    return safe
+  }
+
   // Check for destructive flags on otherwise-safe commands.
   // For branch-gated commands (push, rebase), destructive flags are only
   // dangerous on protected branches — force pushing a feature branch is normal.
@@ -225,8 +245,9 @@ export function checkGitCommand(argsOrCommand: string[] | string, customProtecte
     return safe
   }
 
-  // Known safe subcommands
+  // Known safe subcommands (built-in set, plus any added via config)
   if (SAFE_SUBCOMMANDS.has(subcommand)) return safe
+  if (customSafeSubcommands?.has(subcommand)) return safe
 
   // Unknown subcommand — prompt
   return unsafe(`git: unknown subcommand ${subcommand}`, `Unknown git subcommand "${subcommand}"`)

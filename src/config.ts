@@ -13,7 +13,7 @@ import { existsSync } from "fs";
 
 export interface HallPassConfig {
   commands: { safe: string[]; db_clients: string[]; safe_scripts: string[] };
-  git: { protected_branches: string[] };
+  git: { protected_branches: string[]; safe_subcommands: string[] };
   paths: { protected: string[]; read_only: string[]; no_delete: string[] };
   audit: { enabled: boolean; path: string };
   debug: { enabled: boolean };
@@ -35,7 +35,7 @@ export const DEFAULT_READ_ONLY_PATHS = ["**/.env", "**/.env.*"];
 
 const DEFAULT_CONFIG: HallPassConfig = {
   commands: { safe: [], db_clients: [], safe_scripts: [] },
-  git: { protected_branches: [] },
+  git: { protected_branches: [], safe_subcommands: [] },
   paths: {
     protected: DEFAULT_PROTECTED_PATHS,
     read_only: DEFAULT_READ_ONLY_PATHS,
@@ -103,6 +103,10 @@ function mergeConfig(
       protected_branches: [
         ...defaults.git.protected_branches,
         ...(git?.protected_branches ?? []),
+      ],
+      safe_subcommands: [
+        ...defaults.git.safe_subcommands,
+        ...(git?.safe_subcommands ?? []),
       ],
     },
     paths: {
@@ -203,6 +207,10 @@ export function generateDefaultConfig(): string {
 [git]
 # Additional branches to protect (added to main, master, staging, production, prod)
 # protected_branches = ["release"]
+# Additional git subcommands to auto-approve (extends the built-in safe set).
+# Trust implication: a listed subcommand is approved on its own; per-subcommand
+# arg/flag inspection still applies where hall-pass defines it.
+# safe_subcommands = ["lfs", "subtree"]
 
 [paths]
 # Paths where ALL operations are blocked
