@@ -27,6 +27,55 @@ describe("extractSqlFromArgs", () => {
       const args = ["psql", "postgres://dc:dc@localhost:5433/dc", "-t", "-c", "SELECT DISTINCT id FROM search_index LIMIT 1"]
       expect(extractSqlFromArgs("psql", args)).toBe("SELECT DISTINCT id FROM search_index LIMIT 1")
     })
+
+    test("bundled short flags -tAc", () => {
+      const args = ["psql", "matter", "-tAc", "SELECT count(*) FROM argument_nodes"]
+      expect(extractSqlFromArgs("psql", args)).toBe("SELECT count(*) FROM argument_nodes")
+    })
+
+    test("bundled with attached SQL -tAcSELECT", () => {
+      const args = ["psql", "matter", "-tAcSELECT 1"]
+      expect(extractSqlFromArgs("psql", args)).toBe("SELECT 1")
+    })
+
+    test("value-taking flag consumes next arg: -h host -tAc", () => {
+      const args = ["psql", "-h", "localhost", "-tAc", "SELECT 1"]
+      expect(extractSqlFromArgs("psql", args)).toBe("SELECT 1")
+    })
+
+    test("-Fc is a field separator, not a command flag", () => {
+      // F takes a value; the attached "c" is that value, NOT -c
+      const args = ["psql", "-Fc", "dbname"]
+      expect(extractSqlFromArgs("psql", args)).toBeNull()
+    })
+
+    test("-F -c: the -c is F's separator value, not a command flag", () => {
+      const args = ["psql", "-F", "-c", "dbname"]
+      expect(extractSqlFromArgs("psql", args)).toBeNull()
+    })
+
+    test("unknown bundled letter aborts extraction (fail safe)", () => {
+      const args = ["psql", "-tQc", "SELECT 1"]
+      expect(extractSqlFromArgs("psql", args)).toBeNull()
+    })
+
+    test("multiple -c flags are ALL collected", () => {
+      const args = ["psql", "-c", "SELECT 1", "-c", "DROP TABLE users"]
+      expect(extractSqlFromArgs("psql", args)).toBe("SELECT 1;\nDROP TABLE users")
+    })
+
+    test("multiple -c: read-only pair still reads as read-only", () => {
+      const args = ["psql", "-c", "SELECT 1", "-tAc", "SELECT 2"]
+      const sql = extractSqlFromArgs("psql", args)
+      expect(sql).toBe("SELECT 1;\nSELECT 2")
+      expect(isSqlReadOnly(sql!)).toBe(true)
+    })
+
+    test("hidden write behind a leading SELECT is caught end-to-end", () => {
+      const args = ["psql", "-c", "SELECT 1", "-c", "DROP TABLE users"]
+      const sql = extractSqlFromArgs("psql", args)
+      expect(isSqlReadOnly(sql!)).toBe(false)
+    })
   })
 
   describe("mysql", () => {
