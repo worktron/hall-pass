@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { extractSqlFromArgs, extractSqlFromPsql, isSqlReadOnly } from "./sql.ts"
+import { extractSqlFromArgs, extractSqlFromPsql, isSqlReadOnly, isStatementReadOnly } from "./sql.ts"
 
 describe("extractSqlFromArgs", () => {
   describe("psql", () => {
@@ -331,5 +331,73 @@ describe("isSqlReadOnly", () => {
 
   test("empty string returns true", () => {
     expect(isSqlReadOnly("")).toBe(true)
+  })
+})
+
+describe("set operations (UNION/INTERSECT/EXCEPT)", () => {
+  // A top-level `SELECT ... UNION ALL SELECT ...` parses to a "union all"
+  // node, not a "select". Checking only the top-level statement type made
+  // every read-only union prompt.
+  const readOnly = [
+    "SELECT 1 FROM a UNION SELECT 2 FROM b",
+    "SELECT 1 FROM a UNION ALL SELECT 2 FROM b",
+    "SELECT 1 FROM a UNION ALL SELECT 2 FROM b UNION ALL SELECT 3 FROM c",
+    "SELECT 'nodes', count(*) FROM argument_nodes UNION ALL SELECT 'deps', count(*) FROM argument_dependencies",
+    "SELECT 'a', count(*) FROM t UNION ALL SELECT 'b', (SELECT count(*) FROM u)",
+  ]
+
+  for (const sql of readOnly) {
+    test(`read-only: ${sql}`, () => {
+      expect(isSqlReadOnly(sql)).toBe(true)
+    })
+  }
+
+  test("a write in either branch is still a write", () => {
+    expect(isSqlReadOnly("SELECT 1 FROM a UNION ALL (WITH y AS (DELETE FROM t RETURNING id) SELECT * FROM y)")).toBe(false)
+  })
+})
+
+describe("data-modifying CTEs", () => {
+  // Postgres allows INSERT/UPDATE/DELETE inside a CTE body. These parse as
+  // a top-level "with" node, so treating "with" as read-only auto-approved
+  // the write. Each binding has to be walked.
+  const writes = [
+    "WITH x AS (INSERT INTO t VALUES (1) RETURNING id) SELECT * FROM x",
+    "WITH x AS (UPDATE t SET a = 1 RETURNING id) SELECT * FROM x",
+    "WITH x AS (DELETE FROM t WHERE id = 1 RETURNING id) SELECT * FROM x",
+    "WITH a AS (SELECT 1 AS id), b AS (DELETE FROM t RETURNING id) SELECT * FROM a JOIN b ON a.id = b.id",
+  ]
+
+  for (const sql of writes) {
+    test(`write: ${sql}`, () => {
+      expect(isSqlReadOnly(sql)).toBe(false)
+    })
+  }
+
+  test("a CTE that only selects is still read-only", () => {
+    expect(isSqlReadOnly("WITH x AS (SELECT 1 AS id) SELECT * FROM x")).toBe(true)
+  })
+
+  test("nested read-only CTEs stay read-only", () => {
+    expect(isSqlReadOnly("WITH a AS (SELECT 1 AS id), b AS (SELECT * FROM a) SELECT * FROM b")).toBe(true)
+  })
+})
+
+describe("isStatementReadOnly (direct)", () => {
+  test("rejects a non-object", () => {
+    expect(isStatementReadOnly(null)).toBe(false)
+    expect(isStatementReadOnly("select")).toBe(false)
+  })
+
+  test("rejects a node with no type", () => {
+    expect(isStatementReadOnly({})).toBe(false)
+  })
+
+  test("rejects a compound node with a missing branch", () => {
+    expect(isStatementReadOnly({ type: "union all", left: { type: "select" } })).toBe(false)
+  })
+
+  test("rejects a with-node whose bind is not an array", () => {
+    expect(isStatementReadOnly({ type: "with", bind: null, in: { type: "select" } })).toBe(false)
   })
 })

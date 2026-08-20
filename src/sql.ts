@@ -14,12 +14,65 @@ import { parse } from "pgsql-ast-parser"
 import { isPsqlMetaCommandSafe } from "./psql.ts"
 import { isSqliteDotCommandSafe, isSqlitePragmaReadOnly } from "./sqlite.ts"
 
+/**
+ * Statement types that read and cannot write, whatever they contain.
+ * Compound and CTE statements are NOT here — they wrap other statements
+ * and have to be walked, see isStatementReadOnly.
+ */
 const READ_ONLY_TYPES = new Set([
   "select",
-  "with",        // WITH ... SELECT (CTEs)
   "show",
   "values",      // bare VALUES clause
 ])
+
+/**
+ * Set-operation nodes. Read-only iff both branches are.
+ * A bare `SELECT ... UNION ALL SELECT ...` parses to a top-level
+ * "union all" node, not a "select" — checking only the top-level type
+ * made every read-only union prompt.
+ */
+const COMPOUND_TYPES = new Set([
+  "union",
+  "union all",
+  "intersect",
+  "intersect all",
+  "except",
+  "except all",
+])
+
+/**
+ * Is this parsed statement read-only, all the way down?
+ *
+ * Top-level type alone is not enough. Postgres allows data-modifying CTEs —
+ * `WITH x AS (DELETE FROM t RETURNING id) SELECT * FROM x` is a "with" node
+ * that deletes rows. Treating "with" as read-only auto-approved those writes,
+ * so every wrapper node gets walked into instead.
+ */
+export function isStatementReadOnly(stmt: unknown): boolean {
+  if (!stmt || typeof stmt !== "object") return false
+  const node = stmt as Record<string, unknown>
+  const type = node.type
+
+  if (typeof type !== "string") return false
+  if (READ_ONLY_TYPES.has(type)) return true
+
+  if (COMPOUND_TYPES.has(type)) {
+    return isStatementReadOnly(node.left) && isStatementReadOnly(node.right)
+  }
+
+  if (type === "with") {
+    // Each CTE body can be an INSERT/UPDATE/DELETE; the final statement can too.
+    const bind = node.bind
+    if (!Array.isArray(bind)) return false
+    const bindingsOk = bind.every(
+      (b) => isStatementReadOnly((b as Record<string, unknown> | null)?.statement),
+    )
+    return bindingsOk && isStatementReadOnly(node.in)
+  }
+
+  // Unknown or writing statement type — fail closed.
+  return false
+}
 
 /**
  * Flags that introduce an inline SQL string, per DB client.
@@ -185,7 +238,7 @@ export function isSqlReadOnly(sql: string): boolean {
   try {
     const statements = parse(trimmed)
     if (statements.length === 0) return true
-    return statements.every((stmt) => READ_ONLY_TYPES.has(stmt.type))
+    return statements.every(isStatementReadOnly)
   } catch {
     // Can't parse = can't guarantee safety = prompt
     return false
