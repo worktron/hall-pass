@@ -235,15 +235,45 @@ describe("adversarial: quoting tricks", () => {
 })
 
 describe("adversarial: dangerous flag variants", () => {
-  describe("should PROMPT — sed in-place editing", () => {
+  describe("should PROMPT — sed in-place editing of a protected path", () => {
+    // Every spelling of in-place editing has to be caught. The old guard was
+    // `arg.startsWith("-i")`, which only sees `i` as the FIRST letter of an
+    // option, so --in-place and any bundle like -ni/-si/-Ei wrote to protected
+    // files with no prompt at all.
     const prompted = [
-      "sed -i '' 's/foo/bar/g' file.txt",
-      "sed -i.bak 's/foo/bar/g' file.txt",
+      "sed -i '' 's/foo/bar/g' ~/.ssh/config",
+      "sed -i.bak 's/foo/bar/g' ~/.ssh/config",
+      "sed --in-place 's/foo/bar/g' ~/.ssh/config",
+      "sed --in-place=.bak 's/foo/bar/g' ~/.ssh/config",
+      "sed -ni 's/foo/bar/p' ~/.ssh/config",
+      "sed -si 's/foo/bar/g' ~/.ssh/config",
+      "sed -Ei 's/foo/bar/g' ~/.ssh/config",
+      "sed -i '' 's/foo/bar/g' ~/.aws/credentials",
+      "sed --in-place 's/foo/bar/g' server-key.pem",
+      // The target is unknowable, so it could be any of the above.
+      "sed -i '' 's/foo/bar/g' \"$TARGET\"",
+      "find . -name '*.ts' -exec sed -i '' 's/foo/bar/g' {} \\;",
     ]
 
     for (const cmd of prompted) {
       test(cmd, async () => {
         expectPrompt(await runHook(cmd))
+      })
+    }
+  })
+
+  describe("should ALLOW — sed in-place editing of an ordinary file", () => {
+    // Same operation the Edit tool performs, which decide.ts auto-approves.
+    const allowed = [
+      "sed -i '' 's/foo/bar/g' file.txt",
+      "sed -i.bak 's/foo/bar/g' src/app.ts",
+      "sed --in-place 's/foo/bar/g' src/app.ts",
+      "sed -i '' -e 's/a/b/' -e 's/c/d/' src/app.ts",
+    ]
+
+    for (const cmd of allowed) {
+      test(cmd, async () => {
+        expectAllow(await runHook(cmd))
       })
     }
   })
