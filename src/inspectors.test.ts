@@ -10,7 +10,7 @@ function cmd(name: string, ...rest: string[]): CommandInfo {
 /** Minimal config for unit tests — no path protection, no custom commands. */
 const TEST_CONFIG: HallPassConfig = {
   commands: { safe: [], db_clients: [], safe_scripts: [] },
-  git: { protected_branches: [] },
+  git: { protected_branches: [], safe_subcommands: [] },
   paths: { protected: [], read_only: [], no_delete: [] },
   audit: { enabled: false, path: "" },
   debug: { enabled: false },
@@ -1321,7 +1321,7 @@ describe("evaluateBashCommand", () => {
     test("git with custom protected branches", () => {
       const config: HallPassConfig = {
         ...TEST_CONFIG,
-        git: { protected_branches: ["release"] },
+        git: { protected_branches: ["release"], safe_subcommands: [] },
       }
       const ctx = createEvalContext(config, [], shfmtBin)
       // "release" is protected, "main" falls back to defaults only when no config branches

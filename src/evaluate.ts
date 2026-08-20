@@ -35,6 +35,7 @@ export interface EvalContext {
   configSafe: Set<string>
   dbClients: Set<string>
   protectedBranches?: Set<string>
+  safeSubcommands?: Set<string>
   shfmtBin: string
   pipelineCommands: CommandInfo[]
   evaluate: (cmd: CommandInfo) => EvalResult
@@ -53,12 +54,16 @@ export function createEvalContext(
   const protectedBranches = config.git.protected_branches.length > 0
     ? new Set(config.git.protected_branches)
     : undefined
+  const safeSubcommands = config.git.safe_subcommands.length > 0
+    ? new Set(config.git.safe_subcommands)
+    : undefined
 
   const ctx: EvalContext = {
     config,
     configSafe,
     dbClients,
     protectedBranches,
+    safeSubcommands,
     shfmtBin,
     pipelineCommands,
     evaluate: (cmd) => evaluateBashCommand(cmd, ctx),

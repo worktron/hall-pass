@@ -265,4 +265,46 @@ describe("checkGitCommand", () => {
       expect(checkGitCommand("git -c color.ui=auto status").safe).toBe(true)
     })
   })
+  describe("symbolic-ref — reads safe, writes prompt", () => {
+    const safe = [
+      "git symbolic-ref refs/remotes/origin/HEAD",
+      "git symbolic-ref --short HEAD",
+      "git symbolic-ref -q HEAD",
+      "git symbolic-ref --short refs/remotes/origin/HEAD",
+    ]
+    for (const cmd of safe) {
+      test(`safe: ${cmd}`, () => expect(checkGitCommand(cmd).safe).toBe(true))
+    }
+
+    const unsafe = [
+      "git symbolic-ref HEAD refs/heads/other",
+      "git symbolic-ref --delete HEAD",
+      "git symbolic-ref -d refs/remotes/origin/HEAD",
+    ]
+    for (const cmd of unsafe) {
+      test(`unsafe: ${cmd}`, () => expect(checkGitCommand(cmd).safe).toBe(false))
+    }
+
+    test("the /receive lookup is auto-approved", () => {
+      expect(checkGitCommand("git symbolic-ref refs/remotes/origin/HEAD").safe).toBe(true)
+    })
+  })
+
+  describe("config-supplied safe subcommands", () => {
+    test("unknown subcommand prompts by default", () => {
+      expect(checkGitCommand("git lfs ls-files").safe).toBe(false)
+    })
+
+    test("same subcommand is safe once added via config", () => {
+      expect(checkGitCommand("git lfs ls-files", undefined, new Set(["lfs"])).safe).toBe(true)
+    })
+
+    test("config cannot override a destructive subcommand", () => {
+      expect(checkGitCommand("git reset --hard", undefined, new Set(["reset"])).safe).toBe(false)
+    })
+
+    test("config cannot override protected-branch push gating", () => {
+      expect(checkGitCommand("git push origin main", undefined, new Set(["push"])).safe).toBe(false)
+    })
+  })
 })

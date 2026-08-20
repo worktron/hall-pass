@@ -9,7 +9,7 @@ import { tmpdir } from "os"
 function makeConfig(enabled: boolean, path: string): HallPassConfig {
   return {
     commands: { safe: [], db_clients: [], safe_scripts: [] },
-    git: { protected_branches: [] },
+    git: { protected_branches: [], safe_subcommands: [] },
     paths: { protected: [], read_only: [], no_delete: [] },
     audit: { enabled, path },
     debug: { enabled: false },

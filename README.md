@@ -30,6 +30,7 @@ Git commands get deeper inspection of subcommands and flags. Safe operations are
 | Auto-approved | Prompts |
 |---|---|
 | `git status`, `log`, `diff`, `show`, `branch` | `git push --force`, `push -f` |
+| `git symbolic-ref <ref>` (read) | `git symbolic-ref HEAD <ref>` (repoints HEAD) |
 | `git add`, `commit`, `stash`, `fetch`, `pull` | `git reset --hard` |
 | `git push` (feature branches) | `git clean -f` |
 | `git checkout <branch>`, `switch` | `git checkout .`, `restore .` |
@@ -136,6 +137,8 @@ db_clients = ["pgcli"]
 [git]
 # Additional protected branches (extends main, master, staging, production, prod)
 protected_branches = ["release"]
+# Additional git subcommands to auto-approve (extends the built-in safe set)
+safe_subcommands = ["lfs", "subtree"]
 
 [paths]
 # Block ALL operations on these paths

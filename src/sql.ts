@@ -32,6 +32,21 @@ const SQL_FLAGS: Record<string, Set<string>> = {
 }
 
 /**
+ * Short-option semantics for un-bundling combined flags like
+ * `psql -tAc "SELECT ..."` (= -t -A -c). Walked with getopt rules:
+ * boolean letters continue the bundle; a value-taking letter consumes
+ * the rest of the token, or the next arg when it's last; the sql
+ * letter's value is the SQL to inspect. An unrecognized letter aborts
+ * extraction entirely (fail safe to prompt).
+ *
+ * Only psql for now — mysql's `-p[password]` takes an OPTIONAL attached
+ * value, which breaks getopt walking; bundled `-e` stays a prompt there.
+ */
+const SHORT_OPTS: Record<string, { boolean: string; value: string; sql: string }> = {
+  psql: { boolean: "aAbeEHlnqsStwWxXz01V", value: "dfFhLopPRTUv", sql: "c" },
+}
+
+/**
  * Extract the SQL string from a DB client command's parsed args.
  *
  * Works with all supported clients:
@@ -64,21 +79,62 @@ export function extractSqlFromArgs(clientName: string, args: string[]): string |
     return positional.length >= 2 ? positional[1]! : null
   }
 
-  // psql/mysql: look for -c/-e/--command/--execute followed by SQL
+  // psql/mysql: look for -c/-e/--command/--execute followed by SQL.
+  // Collect EVERY occurrence — psql executes all -c flags in order, so
+  // returning just the first would let `-c "SELECT 1" -c "DROP x"`
+  // masquerade as read-only. The joined string parses as multiple
+  // statements and each must pass the read-only check.
   if (flags) {
+    const short = SHORT_OPTS[clientName]
+    const collected: string[] = []
     for (let i = 1; i < args.length; i++) {
       const arg = args[i]!
       // Handle --flag=value form
-      for (const flag of flags) {
-        if (arg.startsWith(flag + "=")) {
-          return arg.slice(flag.length + 1)
-        }
+      const eqFlag = [...flags].find((f) => arg.startsWith(f + "="))
+      if (eqFlag) {
+        collected.push(arg.slice(eqFlag.length + 1))
+        continue
       }
       // Handle --flag value form
-      if (flags.has(arg) && i + 1 < args.length) {
-        return args[i + 1]!
+      if (flags.has(arg)) {
+        if (i + 1 < args.length) {
+          collected.push(args[i + 1]!)
+          i++
+        }
+        continue
+      }
+      // Bundled/short options: -tAc "SQL", -h host, -Fc (F's value is "c").
+      // Only the letters BEFORE the sql/value letter are validated; the
+      // walk breaks at the first of those, so attached values (-tAcSELECT,
+      // -p5432) pass through untouched and any unknown letter aborts.
+      if (short && !arg.startsWith("--") && /^-[A-Za-z0-9]/.test(arg)) {
+        const letters = arg.slice(1)
+        for (let j = 0; j < letters.length; j++) {
+          const ch = letters[j]!
+          if (ch === short.sql) {
+            const attached = letters.slice(j + 1)
+            if (attached) {
+              collected.push(attached)
+            } else if (i + 1 < args.length) {
+              collected.push(args[i + 1]!)
+              i++
+            }
+            break
+          }
+          if (short.value.includes(ch)) {
+            // Rest of the token is this option's value; if there is
+            // no rest, the NEXT arg is — skip it so `-F -c` doesn't
+            // read the literal "-c" separator value as a command flag.
+            if (j === letters.length - 1) i++
+            break
+          }
+          if (!short.boolean.includes(ch)) {
+            return null // unknown letter — don't guess, force a prompt
+          }
+        }
       }
     }
+    return collected.length > 0 ? collected.join(";\n") : null
   }
 
   return null
