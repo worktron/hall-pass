@@ -26,6 +26,15 @@ function makeCtx(pipelineCommands: CommandInfo[] = []): EvalContext {
   return createEvalContext(TEST_CONFIG, pipelineCommands, shfmtBin)
 }
 
+/** A context whose config actually protects some paths, for path-aware checks. */
+function makeProtectedCtx(): EvalContext {
+  const config: HallPassConfig = {
+    ...TEST_CONFIG,
+    paths: { protected: ["**/.ssh/**", "**/credentials*", "**/*.pem"], read_only: [], no_delete: [] },
+  }
+  return createEvalContext(config, [], shfmtBin)
+}
+
 function expectAllow(cmdInfo: CommandInfo, ctx?: EvalContext) {
   const result = evaluateBashCommand(cmdInfo, ctx ?? makeCtx())
   expect(result.decision).toBe("allow")
@@ -234,6 +243,9 @@ describe("evaluateBashCommand", () => {
   })
 
   describe("sed", () => {
+    // An in-place edit of an unprotected file is the same operation the Edit
+    // tool performs, and decide.ts auto-approves that. These use the default
+    // TEST_CONFIG, which protects nothing.
     test("sed 's/foo/bar/' file → allow", () => {
       expectAllow(cmd("sed", "s/foo/bar/", "file.txt"))
     })
@@ -242,12 +254,114 @@ describe("evaluateBashCommand", () => {
       expectAllow(cmd("sed", "-n", "/pattern/p", "file.txt"))
     })
 
-    test("sed -i 's/foo/bar/' file → prompt", () => {
-      expectPrompt(cmd("sed", "-i", "", "s/foo/bar/", "file.txt"))
+    test("sed -i '' on an unprotected file → allow", () => {
+      expectAllow(cmd("sed", "-i", "", "s/foo/bar/", "file.txt"))
     })
 
-    test("sed -i.bak 's/foo/bar/' file → prompt", () => {
-      expectPrompt(cmd("sed", "-i.bak", "s/foo/bar/", "file.txt"))
+    test("sed -i.bak on an unprotected file → allow", () => {
+      expectAllow(cmd("sed", "-i.bak", "s/foo/bar/", "file.txt"))
+    })
+
+    test("multiple file operands → allow", () => {
+      expectAllow(cmd("sed", "-i", "", "s/a/b/g", "one.ts", "two.ts"))
+    })
+
+    test("-e scripts mean every positional is a file", () => {
+      expectAllow(cmd("sed", "-i", "", "-e", "s/a/b/", "-e", "s/c/d/", "f.ts"))
+    })
+
+    describe("in-place detection — every spelling of it", () => {
+      // The old check was `arg.startsWith("-i")`, which only sees `i` as the
+      // FIRST letter of an option. Everything below edits in place and was
+      // previously allowed outright.
+      const protectedCtx = makeProtectedCtx()
+
+      const inPlaceForms: [string, string[]][] = [
+        ["-i ''",           ["-i", "", "s/a/b/"]],
+        ["-i.bak",          ["-i.bak", "s/a/b/"]],
+        ["--in-place",      ["--in-place", "s/a/b/"]],
+        ["--in-place=.bak", ["--in-place=.bak", "s/a/b/"]],
+        ["-ni",             ["-ni", "s/a/b/p"]],
+        ["-si",             ["-si", "s/a/b/"]],
+        ["-Ei",             ["-Ei", "s/a/b/"]],
+      ]
+
+      for (const [label, flags] of inPlaceForms) {
+        test(`sed ${label} on a protected path → prompt`, () => {
+          expectPrompt(cmd("sed", ...flags, "/home/u/.ssh/config"), protectedCtx)
+        })
+      }
+    })
+
+    describe("path protection", () => {
+      const protectedCtx = makeProtectedCtx()
+
+      test("protected path → prompt", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/", "/home/u/.ssh/config"), protectedCtx)
+      })
+
+      test("unprotected path under the same config → allow", () => {
+        expectAllow(cmd("sed", "-i", "", "s/a/b/", "/home/u/project/src/app.ts"), protectedCtx)
+      })
+
+      test("any one protected file in the list is enough to prompt", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/", "ok.ts", "/home/u/.ssh/config"), protectedCtx)
+      })
+
+      test("read-only sed on a protected path is still fine", () => {
+        expectAllow(cmd("sed", "-n", "1,5p", "/home/u/.ssh/config"), protectedCtx)
+      })
+    })
+
+    describe("BSD and GNU -i suffix forms resolve the same file", () => {
+      const protectedCtx = makeProtectedCtx()
+
+      test("BSD: bare -i with a separate empty suffix", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/", "/home/u/.ssh/config"), protectedCtx)
+      })
+
+      test("BSD: bare -i with a separate .bak suffix", () => {
+        expectPrompt(cmd("sed", "-i", ".bak", "s/a/b/", "/home/u/.ssh/config"), protectedCtx)
+      })
+
+      test("GNU: bare -i, next arg is the script not a suffix", () => {
+        expectPrompt(cmd("sed", "-i", "s/a/b/", "/home/u/.ssh/config"), protectedCtx)
+      })
+
+      test("a dotfile operand is not swallowed as a backup suffix", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/", "/home/u/.ssh/config"), protectedCtx)
+      })
+    })
+
+    describe("fails closed when the target cannot be determined", () => {
+      test("-i with no script or file", () => {
+        expectPrompt(cmd("sed", "-i"))
+      })
+
+      test("-i with a script but no file operand", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/"))
+      })
+
+      test("-i with only one positional, which is the script", () => {
+        expectPrompt(cmd("sed", "-i", "", "f.ts"))
+      })
+
+      // These operands could each stand for a protected file.
+      test("find's {} placeholder", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/", "{}"))
+      })
+
+      test("an unexpanded glob", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/", "src/*.ts"))
+      })
+
+      test("a shell variable", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/", "$f"))
+      })
+
+      test("a brace expansion", () => {
+        expectPrompt(cmd("sed", "-i", "", "s/a/b/", "src/{a,b}.ts"))
+      })
     })
   })
 

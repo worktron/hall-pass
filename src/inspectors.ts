@@ -11,6 +11,7 @@ import { extractCommandInfos } from "./parser.ts"
 import type { EvalResult, EvalContext } from "./evaluate.ts"
 import { checkGitCommand } from "./git.ts"
 import { DANGEROUS_ENV_VARS } from "./safelist.ts"
+import { checkFilePath } from "./paths.ts"
 
 export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 
@@ -219,12 +220,29 @@ export const INSPECTORS: Record<string, Inspector> = {
     return allow("rsync: local copy")
   },
 
-  sed: (cmdInfo) => {
-    // sed is safe UNLESS it uses -i (in-place editing)
-    for (const arg of cmdInfo.args) {
-      if (arg === "-i" || arg.startsWith("-i")) return prompt("sed: -i in-place", `"sed -i" edits files in-place`)
+  sed: (cmdInfo, ctx) => {
+    // sed only writes with in-place editing. Without it, nothing to check.
+    const parsed = parseSedArgs(cmdInfo.args)
+    if (!parsed.inPlace) return allow("sed: read-only")
+
+    // "sed -i" does what the Edit tool does, so it gets the same two checks
+    // Edit gets in decide.ts: the target path, then the content for secrets.
+    // Blanket-prompting instead would be inconsistent with Edit, which
+    // auto-approves a write to an unprotected path.
+    if (parsed.uncertain || parsed.files.length === 0) {
+      return prompt("sed: -i with unverifiable target", `"sed -i" edits in place and the target file could not be determined`)
     }
-    return allow("sed: read-only")
+
+    for (const file of parsed.files) {
+      const decision = checkFilePath(file, "write", ctx.config)
+      if (!decision.allowed) {
+        return prompt(`path-blocked: sed ${decision.reason}`, `"sed -i" targets ${decision.reason}`)
+      }
+    }
+
+    // No secret scan here: decide.ts already scans the whole Bash command
+    // string for credentials before evaluation ever reaches an inspector.
+    return allow(`sed: -i on ${parsed.files.length} unprotected file(s)`)
   },
 
   awk: (cmdInfo) => {
@@ -921,6 +939,133 @@ export const INSPECTORS: Record<string, Inspector> = {
     }
     return allow("code: opens editor")
   },
+}
+
+interface SedParse {
+  /** True if any form of in-place editing was requested. */
+  inPlace: boolean
+  /** The sed script(s) — tracked so they are never mistaken for file operands. */
+  scripts: string[]
+  /** File operands the edit would rewrite. */
+  files: string[]
+  /** Set when the arguments could not be resolved confidently — fail closed. */
+  uncertain: boolean
+}
+
+/** Operands that cannot be resolved to a concrete path at hook time. */
+const UNRESOLVABLE_OPERAND = /[*?$`{}\[\]]/
+
+/** Short sed options that take a value (getopt: rest of the token, else next arg). */
+const SED_VALUE_LETTERS = new Set(["e", "f"])
+
+/**
+ * Parse sed's arguments well enough to answer two questions: does this edit in
+ * place, and which files would it rewrite?
+ *
+ *   sed [-Ealnrsuz] [-i[suffix]] script [file ...]
+ *   sed [-Ealnrsuz] [-e script] [-f file] [-i[suffix]] [file ...]
+ *
+ * The previous check was `arg.startsWith("-i")`, which only sees `i` as the
+ * FIRST letter of an option. `--in-place`, `-ni`, `-si` and `-Ei` all edit in
+ * place and all slipped through.
+ */
+function parseSedArgs(args: string[]): SedParse {
+  const out: SedParse = { inPlace: false, scripts: [], files: [], uncertain: false }
+  const positionals: string[] = []
+  let sawScriptFlag = false   // -e or -f given, so every positional is a file
+
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i]!
+
+    if (arg === "--") {
+      positionals.push(...args.slice(i + 1))
+      break
+    }
+
+    // Long options
+    if (arg.startsWith("--")) {
+      if (arg === "--in-place" || arg.startsWith("--in-place=")) { out.inPlace = true; continue }
+      if (arg === "--expression" || arg === "--file") {
+        sawScriptFlag = true
+        const value = args[++i]
+        if (value === undefined) { out.uncertain = true; break }
+        out.scripts.push(value)
+        continue
+      }
+      if (arg.startsWith("--expression=") || arg.startsWith("--file=")) {
+        sawScriptFlag = true
+        out.scripts.push(arg.slice(arg.indexOf("=") + 1))
+        continue
+      }
+      continue  // other long options take no value we care about
+    }
+
+    // Short option bundle — walk it with getopt rules.
+    if (arg.startsWith("-") && arg.length > 1) {
+      let consumedNext = false
+      for (let c = 1; c < arg.length; c++) {
+        const letter = arg[c]!
+        if (letter === "i") {
+          // Everything after `i` is GNU's attached backup suffix.
+          out.inPlace = true
+          break
+        }
+        if (SED_VALUE_LETTERS.has(letter)) {
+          sawScriptFlag = true
+          const attached = arg.slice(c + 1)
+          if (attached) {
+            out.scripts.push(attached)
+          } else {
+            const value = args[++i]
+            if (value === undefined) { out.uncertain = true }
+            else out.scripts.push(value)
+            consumedNext = true
+          }
+          break
+        }
+        // Any other letter is a boolean flag — keep walking the bundle.
+      }
+      if (consumedNext) continue
+      continue
+    }
+
+    positionals.push(arg)
+  }
+
+  if (out.uncertain) return out
+
+  // BSD sed requires a separate backup-suffix argument after a bare `-i`;
+  // GNU sed attaches it. When `-i` stood alone, the first positional may be
+  // that suffix rather than the script.
+  const bareI = args.some((a, idx) => idx > 0 && a === "-i")
+  if (bareI && positionals.length > 0) {
+    const first = positionals[0]!
+    // The BSD form in practice is `sed -i '' ...` (empty suffix) or `-i .bak`.
+    if (first === "" || (first.startsWith(".") && !first.includes("/"))) {
+      positionals.shift()
+    }
+  }
+
+  if (!sawScriptFlag) {
+    // First remaining positional is the script; the rest are files.
+    const script = positionals.shift()
+    if (script === undefined) {
+      out.uncertain = true
+      return out
+    }
+    out.scripts.push(script)
+  }
+
+  // A file operand only tells us what gets rewritten if it names a real path.
+  // find's "{}" placeholder, an unexpanded glob, or a shell variable could each
+  // stand for anything — including a protected file — so fail closed instead.
+  if (positionals.some((f) => UNRESOLVABLE_OPERAND.test(f))) {
+    out.uncertain = true
+    return out
+  }
+
+  out.files = positionals
+  return out
 }
 
 /** Shared by the lowercase `tailscale` binary and the capitalized app-bundle name. */
