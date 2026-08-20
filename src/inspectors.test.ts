@@ -1562,3 +1562,219 @@ describe("evaluateBashCommand", () => {
     })
   })
 })
+
+// ── confiscate-notes 2026-08 additions ──────────────────────────────────
+
+describe("dfract", () => {
+  test("read-only subcommands", () => {
+    for (const sub of ["status", "check", "list", "revisions", "preview"]) {
+      expectAllow(cmd("dfract", sub))
+    }
+  })
+
+  test("version and help", () => {
+    expectAllow(cmd("dfract", "--version"))
+    expectAllow(cmd("dfract", "--help"))
+  })
+
+  test("publish is allowed — Drive keeps revision history", () => {
+    expectAllow(cmd("dfract", "publish", "doc.md", "--force"))
+  })
+
+  test("merge prompts — it overwrites the local markdown", () => {
+    expectPrompt(cmd("dfract", "merge", "doc.md"))
+  })
+
+  test("auth and other writers prompt", () => {
+    expectPrompt(cmd("dfract", "auth"))
+    expectPrompt(cmd("dfract", "init"))
+    expectPrompt(cmd("dfract", "mv", "a.md", "b.md"))
+  })
+})
+
+describe("claude", () => {
+  test("version, help, doctor", () => {
+    expectAllow(cmd("claude", "--version"))
+    expectAllow(cmd("claude", "--help"))
+    expectAllow(cmd("claude", "doctor"))
+  })
+
+  test("mcp/plugin/config readers", () => {
+    expectAllow(cmd("claude", "mcp", "list"))
+    expectAllow(cmd("claude", "mcp", "get", "foo"))
+    expectAllow(cmd("claude", "plugin", "list"))
+    expectAllow(cmd("claude", "config", "list"))
+  })
+
+  test("config mutation prompts", () => {
+    expectPrompt(cmd("claude", "mcp", "add", "foo"))
+    expectPrompt(cmd("claude", "mcp", "remove", "foo"))
+    expectPrompt(cmd("claude", "config", "set", "k", "v"))
+  })
+
+  test("-p runs an autonomous agent", () => {
+    expectPrompt(cmd("claude", "-p", "do the thing"))
+    expectPrompt(cmd("claude", "--print", "do the thing"))
+  })
+
+  test("bare claude starts an interactive session", () => {
+    expectPrompt(cmd("claude"))
+  })
+})
+
+describe("crontab", () => {
+  test("-l lists", () => {
+    expectAllow(cmd("crontab", "-l"))
+    expectAllow(cmd("crontab", "-u", "me", "-l"))
+  })
+
+  test("-r wipes every job", () => {
+    expectPrompt(cmd("crontab", "-r"))
+  })
+
+  test("-e edits", () => {
+    expectPrompt(cmd("crontab", "-e"))
+  })
+
+  test("a file argument replaces the crontab", () => {
+    expectPrompt(cmd("crontab", "myjobs.txt"))
+  })
+
+  test("bare crontab reads stdin", () => {
+    expectPrompt(cmd("crontab"))
+  })
+})
+
+describe("gcloud", () => {
+  test("version and info", () => {
+    expectAllow(cmd("gcloud", "--version"))
+    expectAllow(cmd("gcloud", "version"))
+    expectAllow(cmd("gcloud", "info"))
+  })
+
+  test("read-only verbs", () => {
+    expectAllow(cmd("gcloud", "compute", "instances", "list"))
+    expectAllow(cmd("gcloud", "sql", "databases", "describe", "mydb"))
+    expectAllow(cmd("gcloud", "projects", "get-iam-policy", "p"))
+  })
+
+  test("a trailing resource name is not mistaken for the verb", () => {
+    // "mydb" is the resource, "describe" is the verb
+    expectAllow(cmd("gcloud", "sql", "databases", "describe", "mydb"))
+  })
+
+  test("a group sharing a verb's name is still a group", () => {
+    // "run", "config" and "auth" are groups here, not verbs
+    expectAllow(cmd("gcloud", "run", "services", "list"))
+    expectAllow(cmd("gcloud", "config", "list"))
+    expectAllow(cmd("gcloud", "auth", "list"))
+  })
+
+  test("write verbs prompt", () => {
+    expectPrompt(cmd("gcloud", "compute", "instances", "delete", "x"))
+    expectPrompt(cmd("gcloud", "run", "deploy", "svc"))
+    expectPrompt(cmd("gcloud", "config", "set", "project", "p"))
+    expectPrompt(cmd("gcloud", "auth", "login"))
+    expectPrompt(cmd("gcloud", "components", "install", "beta"))
+  })
+
+  test("a flag value cannot masquerade as a verb", () => {
+    expectAllow(cmd("gcloud", "compute", "instances", "list", "--project", "my-delete-project"))
+  })
+
+  test("an unrecognized verb fails closed", () => {
+    expectPrompt(cmd("gcloud", "frobnicate", "wombat"))
+  })
+})
+
+describe("rclone", () => {
+  test("listing and inspection", () => {
+    for (const sub of ["listremotes", "ls", "lsd", "lsjson", "about", "size"]) {
+      expectAllow(cmd("rclone", sub))
+    }
+  })
+
+  test("config show reads, bare config edits", () => {
+    expectAllow(cmd("rclone", "config", "show"))
+    expectPrompt(cmd("rclone", "config"))
+  })
+
+  test("data-moving subcommands prompt", () => {
+    expectPrompt(cmd("rclone", "sync", "a", "b"))
+    expectPrompt(cmd("rclone", "delete", "x"))
+    expectPrompt(cmd("rclone", "purge", "x"))
+    expectPrompt(cmd("rclone", "move", "a", "b"))
+  })
+})
+
+describe("plutil", () => {
+  test("-p and -lint read", () => {
+    expectAllow(cmd("plutil", "-p", "f.plist"))
+    expectAllow(cmd("plutil", "-lint", "f.plist"))
+  })
+
+  test("-extract to stdout reads", () => {
+    expectAllow(cmd("plutil", "-extract", "Destinations", "json", "-o", "-", "f.plist"))
+  })
+
+  test("-convert to stdout reads", () => {
+    expectAllow(cmd("plutil", "-convert", "json", "-o", "-", "f.plist"))
+  })
+
+  test("-convert without -o - rewrites in place", () => {
+    expectPrompt(cmd("plutil", "-convert", "xml1", "f.plist"))
+  })
+
+  test("mutating flags prompt", () => {
+    expectPrompt(cmd("plutil", "-insert", "k", "-string", "v", "f.plist"))
+    expectPrompt(cmd("plutil", "-replace", "k", "-string", "v", "f.plist"))
+    expectPrompt(cmd("plutil", "-remove", "k", "f.plist"))
+  })
+})
+
+describe("mdutil", () => {
+  test("-s reads index status", () => {
+    expectAllow(cmd("mdutil", "-s", "/"))
+    expectAllow(cmd("mdutil", "-a", "-s"))
+  })
+
+  test("-E erases the index", () => {
+    expectPrompt(cmd("mdutil", "-E", "/"))
+  })
+
+  test("-i changes indexing state", () => {
+    expectPrompt(cmd("mdutil", "-i", "off", "/"))
+  })
+})
+
+describe("code", () => {
+  test("opening files is fine", () => {
+    expectAllow(cmd("code", "notes.md"))
+    expectAllow(cmd("code", "."))
+  })
+
+  test("extension install is arbitrary code", () => {
+    expectPrompt(cmd("code", "--install-extension", "some.ext"))
+    expectPrompt(cmd("code", "--uninstall-extension", "some.ext"))
+    expectPrompt(cmd("code", "--install-extension=some.ext"))
+  })
+})
+
+describe("Tailscale (macOS app bundle name)", () => {
+  // The parser basenames command paths, so the app-bundle binary arrives as
+  // "Tailscale" — it must hit the same inspector as the lowercase CLI.
+  test("read-only subcommands", () => {
+    expectAllow(cmd("Tailscale", "status"))
+    expectAllow(cmd("Tailscale", "ip"))
+  })
+
+  test("state-changing subcommands prompt", () => {
+    expectPrompt(cmd("Tailscale", "up", "--reset"))
+    expectPrompt(cmd("Tailscale", "logout"))
+  })
+
+  test("lowercase form still works", () => {
+    expectAllow(cmd("tailscale", "status"))
+    expectPrompt(cmd("tailscale", "up"))
+  })
+})

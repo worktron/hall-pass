@@ -38,20 +38,23 @@ export const SAFE_COMMANDS = new Set([
   // ── Text processing ──────────────────────────────────────────────────
   "grep", "egrep", "fgrep", "rg", "sort", "uniq",
   "tr", "cut", "wc", "head", "tail", "tee", "jq",
-  "fold", "column",
+  "fold", "column", "paste", "comm", "shuf",
+  "base64",   // decode/encode only; `base64 -d | sh` is caught by the pipe-target check
 
   // ── File operations ──────────────────────────────────────────────────
   "ls", "cat", "cp", "mv", "mkdir", "ln", "touch", "diff",
 
   // ── File & data inspection ───────────────────────────────────────────
-  "file", "stat", "strings", "realpath", "basename", "dirname",
-  "less", "more", "xxd", "od", "tree",
+  "file", "stat", "strings", "realpath", "basename", "dirname", "readlink",
+  "less", "more", "xxd", "od", "tree", "cmp",
   "md5", "md5sum", "sha256sum", "sha1sum", "shasum",
 
   // ── Shell builtins & utilities ───────────────────────────────────────
   "echo", "printf", "pwd", "which", "whoami", "test", "[", "true", "false",
   "cd", "pushd", "popd", "export", "set", "unset", "read",
-  "type", "date", "seq",
+  "type", "date", "seq", "uuidgen", "bc",
+  ":", "break", "continue",   // null command and loop control
+  "umask",                    // affects only the hook's own subshell
 
   // ── System info (read-only) ──────────────────────────────────────────
   "hostname", "uname", "id", "df", "du", "free", "uptime", "nproc", "arch",
@@ -61,10 +64,10 @@ export const SAFE_COMMANDS = new Set([
   "open", "sips", "mdfind", "mdls", "mkcert",
   "ioreg", "system_profiler", "vm_stat", "memory_pressure",
   "dscacheutil", "pmset", "textutil", "osxphotos", "powermetrics",
-  "scutil",
+  "scutil", "lsappinfo",
 
   // ── Dev tools ────────────────────────────────────────────────────────
-  "shfmt", "direnv",
+  "shfmt", "direnv", "fc-list",
 
   // ── Web servers & deployment ─────────────────────────────────────────
   "caddy", "vercel", "ngrok",
@@ -76,6 +79,7 @@ export const SAFE_COMMANDS = new Set([
 
   // ── Test runners ─────────────────────────────────────────────────────
   "jest", "vitest", "mocha", "pytest", "phpunit",
+  "playwright", "cypress",
 
   // ── Archive & compression ────────────────────────────────────────────
   "tar", "zip", "unzip", "gzip", "gunzip", "bzip2", "bunzip2", "xz", "unxz",
@@ -122,6 +126,8 @@ export const DB_CLIENTS = new Set([
 export const DANGEROUS_COMMANDS = new Set([
   // File deletion
   "rm", "rmdir", "unlink", "shred",
+  // Database deletion
+  "dropdb",
   // Privilege escalation
   "sudo", "su", "doas",
   // Raw disk / system
