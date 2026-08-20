@@ -856,3 +856,77 @@ describe("end-to-end binary (real spawn)", () => {
     expect(entry!.message).toBe("Permission needed to run: Bash(rm -rf build)")
   })
 })
+
+describe("confiscate-notes 2026-08 — newly safelisted commands", () => {
+  const allowed = [
+    // Text processing / coreutils
+    'echo "1+1" | bc',
+    "uuidgen",
+    "shuf -n 8 items.txt",
+    "cat blob.b64 | base64 -d | head -c 40",
+    "paste -d' ' a.txt b.txt",
+    "comm -12 a.txt b.txt",
+    "cmp a.txt b.txt",
+    "readlink -f ~/Workspace",
+    // Shell builtins that leak into settings files as loop fragments
+    "umask 077",
+    // Dev tooling
+    "fc-list | head -5",
+    "playwright test --reporter=list",
+    "npx playwright --version",
+    "cypress run --spec x.cy.ts",
+    "lsappinfo front",
+    // Real-world shapes from the settings scan
+    "node_modules/.bin/playwright --version",
+  ]
+
+  for (const cmd of allowed) {
+    test(cmd, async () => {
+      expectAllow(await runHook(cmd))
+    })
+  }
+})
+
+describe("confiscate-notes 2026-08 — new inspectors end-to-end", () => {
+  const allowed = [
+    "dfract status",
+    "dfract publish docs/plan.md --account innovid --force",
+    "DFRACT_DEBUG=1 dfract publish docs/plan.md --force",
+    "claude --version",
+    "claude mcp list",
+    "crontab -l",
+    "gcloud --version",
+    "gcloud compute instances list",
+    "rclone listremotes",
+    "plutil -extract Destinations json -o - /Library/Preferences/com.apple.TimeMachine.plist",
+    "mdutil -a -s",
+    "code /Users/me/notes.md",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale status",
+  ]
+
+  for (const cmd of allowed) {
+    test(`allow: ${cmd}`, async () => {
+      expectAllow(await runHook(cmd))
+    })
+  }
+
+  const prompted = [
+    "dfract merge docs/plan.md",
+    "claude -p 'sync the gtm docs'",
+    "claude mcp add evil -- node evil.js",
+    "crontab -r",
+    "gcloud compute instances delete prod-1",
+    "rclone sync local: remote:",
+    "plutil -convert xml1 /Library/Preferences/com.apple.TimeMachine.plist",
+    "mdutil -E /",
+    "code --install-extension some.publisher.ext",
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale up --reset",
+    "dropdb production",
+  ]
+
+  for (const cmd of prompted) {
+    test(`prompt: ${cmd}`, async () => {
+      expectPrompt(await runHook(cmd))
+    })
+  }
+})

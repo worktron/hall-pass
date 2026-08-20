@@ -643,20 +643,12 @@ export const INSPECTORS: Record<string, Inspector> = {
     return prompt(`openssl: ${subcmd}`, `"openssl ${subcmd}" can generate keys, sign, or encrypt`)
   },
 
-  tailscale: (cmdInfo) => {
-    const args = cmdInfo.args
-    if (args.length < 2) return allow("tailscale: no subcommand")
-    const subcmd = args[1]!.toLowerCase()
-    if (subcmd === "version" || subcmd === "--version" || subcmd === "-v") return allow("tailscale: version")
-    if (subcmd === "help" || subcmd === "--help" || subcmd === "-h") return allow("tailscale: help")
-    const safeCmds = new Set([
-      "status", "ip", "netcheck", "ping", "whois",
-      "dns",          // dns has only read sub-subcommands (status, query)
-      "bugreport", "metrics", "licenses",
-    ])
-    if (safeCmds.has(subcmd)) return allow(`tailscale: ${subcmd}`)
-    return prompt(`tailscale: ${subcmd}`, `"tailscale ${subcmd}" can change Tailscale network state`)
-  },
+  tailscale: (cmdInfo, ctx) => tailscaleInspector(cmdInfo, ctx),
+
+  // The macOS app bundle ships the binary as .../MacOS/Tailscale, and the
+  // parser basenames command paths — so the capitalized name has to map to
+  // the same inspector or the app-bundle path escapes inspection entirely.
+  Tailscale: (cmdInfo, ctx) => tailscaleInspector(cmdInfo, ctx),
 
   xattr: (cmdInfo) => {
     // xattr [-lrsvx] file...                  list/print (read)
@@ -714,6 +706,237 @@ export const INSPECTORS: Record<string, Inspector> = {
     // No command = interactive mode
     return prompt("redis-cli: interactive session", "Interactive redis-cli session has unrestricted access")
   },
+
+  // -- Publishing / project CLIs --
+
+  dfract: (cmdInfo) => {
+    // dfract <subcommand> [file] [--flags] — publishes markdown to Google Docs.
+    const args = cmdInfo.args
+    const sub = args[1]?.toLowerCase()
+    if (!sub) return allow("dfract: no subcommand")
+    if (sub === "--version" || sub === "-v") return allow("dfract: version")
+    if (sub === "help" || sub === "--help" || sub === "-h") return allow("dfract: help")
+
+    // Read-only: inspect local state or fetch from Drive without writing.
+    const safeCmds = new Set(["status", "check", "list", "revisions", "preview"])
+    if (safeCmds.has(sub)) return allow(`dfract: ${sub}`)
+
+    // publish writes to a Google Doc, but Drive keeps full revision history
+    // and it is the command this is actually used for.
+    if (sub === "publish") return allow("dfract: publish")
+
+    // merge overwrites the LOCAL markdown from the doc — that loses uncommitted
+    // edits, so it prompts. auth/init/mv/export/docx/style-import write too.
+    return prompt(`dfract: ${sub}`, `"dfract ${sub}" writes files or credentials`)
+  },
+
+  claude: (cmdInfo) => {
+    // Spawning Claude Code from inside a hook: `-p` runs an autonomous agent,
+    // and `mcp add` / `config set` rewrite settings this hook is enforcing.
+    const args = cmdInfo.args
+    const sub = args[1]?.toLowerCase()
+    if (!sub) {
+      return prompt("claude: interactive session", "Starts an interactive Claude Code session")
+    }
+    if (sub === "--version" || sub === "-v") return allow("claude: version")
+    if (sub === "help" || sub === "--help" || sub === "-h") return allow("claude: help")
+    if (sub === "doctor") return allow("claude: doctor")
+
+    // Sub-subcommand readers
+    const verb = args[2]?.toLowerCase()
+    if (sub === "mcp" || sub === "plugin" || sub === "config") {
+      const readVerbs = new Set(["list", "get", "ls"])
+      if (!verb || readVerbs.has(verb)) return allow(`claude ${sub}: ${verb ?? "list"}`)
+      return prompt(`claude ${sub}: ${verb}`, `"claude ${sub} ${verb}" changes Claude Code configuration`)
+    }
+
+    if (sub === "-p" || sub === "--print") {
+      return prompt("claude: -p", `"claude -p" runs an autonomous agent with its own tool access`)
+    }
+    return prompt(`claude: ${sub}`, `"claude ${sub}" may run an agent or change configuration`)
+  },
+
+  // -- Scheduled jobs --
+
+  crontab: (cmdInfo) => {
+    // crontab -l lists; -r wipes every job, -e and `crontab <file>` install them.
+    const args = cmdInfo.args
+    if (args.length === 1) {
+      return prompt("crontab: reads stdin", "Bare \"crontab\" replaces the crontab from stdin")
+    }
+    let sawList = false
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
+      if (arg === "-u") { i++; continue }          // -u <user>, still needs a verb
+      if (arg === "-l") { sawList = true; continue }
+      if (arg === "-r" || arg === "-e" || arg === "-i") {
+        return prompt(`crontab: ${arg}`, `"crontab ${arg}" edits or removes scheduled jobs`)
+      }
+      if (arg.startsWith("-")) continue
+      // A positional file argument installs a new crontab.
+      return prompt("crontab: install from file", `"crontab ${arg}" replaces the current crontab`)
+    }
+    if (sawList) return allow("crontab: -l")
+    return prompt("crontab: unknown form", "Could not confirm this crontab invocation only reads")
+  },
+
+  // -- Cloud CLIs --
+
+  gcloud: (cmdInfo) => {
+    // gcloud <group> [<subgroup>...] <verb> [resource-name] [--flags]
+    // Group names are open-ended, so instead of guessing where the groups end,
+    // scan left to right for the first token that is a known verb. A trailing
+    // resource name must not be mistaken for the verb —
+    // "gcloud sql databases describe mydb" is a read, not a write.
+    const READ_ONLY_VERBS = new Set([
+      "list", "describe", "get", "get-iam-policy", "search", "lookup",
+      "explain", "tail", "history", "check", "validate", "diagnose",
+    ])
+    const WRITE_VERBS = new Set([
+      "create", "delete", "update", "patch", "deploy", "set", "add", "remove",
+      "import", "export", "ssh", "scp", "start", "stop", "restart", "reset",
+      "enable", "disable", "apply", "submit", "run", "login", "logout",
+      "revoke", "promote", "rollback", "undelete", "clone", "copy", "move",
+      "resize", "attach", "detach", "set-iam-policy", "add-iam-policy-binding",
+      "remove-iam-policy-binding", "activate", "install", "uninstall", "config",
+    ])
+
+    const args = cmdInfo.args
+    const positionals: string[] = []
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
+      if (arg === "--version" || arg === "-v") return allow("gcloud: version")
+      if (arg === "--help" || arg === "-h" || arg === "help") return allow("gcloud: help")
+      // Value-taking global flags — skip the value so it can't look like a verb.
+      if (arg === "--project" || arg === "--account" || arg === "--format" ||
+          arg === "--configuration" || arg === "--zone" || arg === "--region" ||
+          arg === "--filter" || arg === "--impersonate-service-account") {
+        i++
+        continue
+      }
+      if (arg.startsWith("-")) continue
+      positionals.push(arg.toLowerCase())
+    }
+    if (positionals.length === 0) return allow("gcloud: no subcommand")
+    if (positionals[0] === "version" || positionals[0] === "info") {
+      return allow(`gcloud: ${positionals[0]}`)
+    }
+
+    // Start at 1: the first positional is always a group, never a verb. Several
+    // top-level groups share a name with a verb ("run", "config", "auth"), and
+    // treating those as verbs made reads like "gcloud run services list" prompt.
+    for (let i = 1; i < positionals.length; i++) {
+      const token = positionals[i]!
+      const group = positionals.slice(0, i).join(" ")
+      if (READ_ONLY_VERBS.has(token) || token.startsWith("list-") || token.startsWith("describe-")) {
+        return allow(`gcloud ${group}: ${token}`)
+      }
+      if (WRITE_VERBS.has(token)) {
+        return prompt(`gcloud ${group}: ${token}`, `"gcloud ${group} ${token}" may modify cloud resources`)
+      }
+    }
+    // No recognizable verb — fail closed.
+    return prompt(`gcloud: ${positionals.join(" ")}`, `Could not confirm "gcloud ${positionals.join(" ")}" only reads`)
+  },
+
+  rclone: (cmdInfo) => {
+    // rclone <subcommand> — sync/delete/purge can destroy remote or local data.
+    const args = cmdInfo.args
+    const sub = args[1]?.toLowerCase()
+    if (!sub) return allow("rclone: no subcommand")
+    if (sub === "--version" || sub === "-v" || sub === "version") return allow("rclone: version")
+    if (sub === "help" || sub === "--help" || sub === "-h") return allow("rclone: help")
+
+    const safeCmds = new Set([
+      "ls", "lsd", "lsl", "lsf", "lsjson", "listremotes",
+      "about", "size", "md5sum", "sha1sum", "hashsum", "cat", "tree",
+      "check", "obscure",
+    ])
+    if (safeCmds.has(sub)) return allow(`rclone: ${sub}`)
+    // `rclone config show` reads; bare `config` is an interactive editor.
+    if (sub === "config") {
+      const verb = args[2]?.toLowerCase()
+      if (verb === "show" || verb === "dump" || verb === "file" || verb === "userinfo") {
+        return allow(`rclone config: ${verb}`)
+      }
+      return prompt(`rclone config: ${verb ?? "(interactive)"}`, `"rclone config" edits remote credentials`)
+    }
+    return prompt(`rclone: ${sub}`, `"rclone ${sub}" can move or delete data`)
+  },
+
+  // -- macOS system utilities --
+
+  plutil: (cmdInfo) => {
+    // plutil -p / -lint read. -convert rewrites the plist IN PLACE unless
+    // the output is redirected to stdout with `-o -`.
+    const args = cmdInfo.args
+    let converting = false
+    let outputsToStdout = false
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
+      if (arg === "-p" || arg === "-lint" || arg === "-help") continue
+      if (arg === "-extract") { i++; continue }       // -extract <keypath> <fmt>
+      if (arg === "-convert") { converting = true; i++; continue }
+      if (arg === "-o" || arg === "--output") {
+        if (args[i + 1] === "-") outputsToStdout = true
+        i++
+        continue
+      }
+      if (arg === "-insert" || arg === "-replace" || arg === "-remove") {
+        return prompt(`plutil: ${arg}`, `"plutil ${arg}" modifies the plist`)
+      }
+    }
+    if (converting && !outputsToStdout) {
+      return prompt("plutil: -convert in place", `"plutil -convert" rewrites the plist unless you pass "-o -"`)
+    }
+    return allow("plutil: read-only")
+  },
+
+  mdutil: (cmdInfo) => {
+    // mdutil -s reads index status; -E erases it and -i off disables indexing.
+    const args = cmdInfo.args
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
+      if (arg === "-E") {
+        return prompt("mdutil: -E", `"mdutil -E" erases the Spotlight index`)
+      }
+      if (arg === "-i" || arg === "-d" || arg === "-X" || arg === "-p") {
+        return prompt(`mdutil: ${arg}`, `"mdutil ${arg}" changes Spotlight indexing state`)
+      }
+    }
+    return allow("mdutil: read-only")
+  },
+
+  // -- Editors --
+
+  code: (cmdInfo) => {
+    // Opening a file is harmless; installing an extension is arbitrary code.
+    const args = cmdInfo.args
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
+      if (arg === "--install-extension" || arg === "--uninstall-extension" ||
+          arg.startsWith("--install-extension=") || arg.startsWith("--uninstall-extension=")) {
+        return prompt(`code: ${arg.split("=")[0]}`, `"code ${arg.split("=")[0]}" installs or removes an extension`)
+      }
+    }
+    return allow("code: opens editor")
+  },
+}
+
+/** Shared by the lowercase `tailscale` binary and the capitalized app-bundle name. */
+function tailscaleInspector(cmdInfo: CommandInfo, _ctx: EvalContext): EvalResult {
+  const args = cmdInfo.args
+  if (args.length < 2) return allow("tailscale: no subcommand")
+  const subcmd = args[1]!.toLowerCase()
+  if (subcmd === "version" || subcmd === "--version" || subcmd === "-v") return allow("tailscale: version")
+  if (subcmd === "help" || subcmd === "--help" || subcmd === "-h") return allow("tailscale: help")
+  const safeCmds = new Set([
+    "status", "ip", "netcheck", "ping", "whois",
+    "dns",          // dns has only read sub-subcommands (status, query)
+    "bugreport", "metrics", "licenses",
+  ])
+  if (safeCmds.has(subcmd)) return allow(`tailscale: ${subcmd}`)
+  return prompt(`tailscale: ${subcmd}`, `"tailscale ${subcmd}" can change Tailscale network state`)
 }
 
 /** First positional (non-flag) argument after the shell name — the script file. */
