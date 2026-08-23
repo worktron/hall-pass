@@ -1892,3 +1892,112 @@ describe("Tailscale (macOS app bundle name)", () => {
     expectPrompt(cmd("tailscale", "up"))
   })
 })
+
+// ── inline-code flag detection across every interpreter ─────────────────
+//
+// The old checks compared whole tokens (`arg === "-e"`), so two spellings of
+// the SAME flag slipped past: the value attached to the flag (`-e'code'`) and
+// the code letter bundled behind another short flag (`-ne code`). Both run
+// arbitrary code.
+
+describe("inline code — attached and bundled flag forms", () => {
+  describe("perl", () => {
+    const prompted: [string, string[]][] = [
+      ["-e with attached value", ["-e" + 'system("id")']],
+      ["-E with attached value", ["-E" + 'say "x"']],
+      ["-ne bundled",            ["-ne", 'system("id")', "/dev/null"]],
+      ["-pe bundled",            ["-pe", 'unlink("/tmp/x")', "f.txt"]],
+      ["-lne bundled",           ["-lne", 'system("id")', "/dev/null"]],
+      ["-ane bundled",           ["-ane", 'system("id")', "/dev/null"]],
+      ["-0777pe slurp bundle",   ["-0777pe", 'system("id")', "f.txt"]],
+      ["-0pi -e separated",      ["-0pi", "-e", "s/a/b/", "f.txt"]],
+      ["-pi -e separated",       ["-pi", "-e", "s/a/b/", "f.txt"]],
+    ]
+    for (const [label, args] of prompted) {
+      test(`${label} → prompt`, () => expectPrompt(cmd("perl", ...args)))
+    }
+
+    // An "e" inside another option's VALUE is not a code flag.
+    const allowed: [string, string[]][] = [
+      ["-Mfeature",              ["-Mfeature", "script.pl"]],
+      ["-MExtUtils::Installed",  ["-MExtUtils::Installed", "script.pl"]],
+      ["-Ilib -Mstrict",         ["-Ilib", "-Mstrict", "script.pl"]],
+      ["-pi.backup suffix",      ["-pi.backup", "script.pl"]],
+      ["-- terminator",          ["--", "-e"]],
+    ]
+    for (const [label, args] of allowed) {
+      test(`${label} → allow`, () => expectAllow(cmd("perl", ...args)))
+    }
+  })
+
+  describe("ruby", () => {
+    test("-e with attached value → prompt", () => {
+      expectPrompt(cmd("ruby", "-e" + 'system("id")'))
+    })
+
+    test("-ne bundled → prompt", () => {
+      expectPrompt(cmd("ruby", "-ne", 'system("id")', "/dev/null"))
+    })
+
+    // -E is an encoding flag in ruby, not eval as it is in perl.
+    test("-Eutf-8 → allow", () => {
+      expectAllow(cmd("ruby", "-Eutf-8", "script.rb"))
+    })
+
+    test("-rerb require containing an e → allow", () => {
+      expectAllow(cmd("ruby", "-Ilib", "-rerb", "script.rb"))
+    })
+  })
+
+  describe("node", () => {
+    test("-e with attached value → prompt", () => {
+      expectPrompt(cmd("node", "-e" + 'require("child_process").execSync("id")'))
+    })
+
+    test("--eval=value → prompt", () => {
+      expectPrompt(cmd("node", "--eval=" + 'require("fs")'))
+    })
+
+    test("--print=value → prompt", () => {
+      expectPrompt(cmd("node", "--print=process.version"))
+    })
+
+    test("-pe bundled → prompt", () => {
+      expectPrompt(cmd("node", "-pe", "process.version"))
+    })
+
+    test("-r require → allow", () => {
+      expectAllow(cmd("node", "-r", "dotenv/config", "app.js"))
+    })
+
+    test("--require → allow", () => {
+      expectAllow(cmd("node", "--require", "./setup.js", "server.js"))
+    })
+  })
+
+  describe("python3", () => {
+    test("-c with attached value → prompt", () => {
+      expectPrompt(cmd("python3", "-c" + "import os; os.system('id')"))
+    })
+
+    test("-Bc bundled → prompt", () => {
+      expectPrompt(cmd("python3", "-Bc", "import os"))
+    })
+
+    test("-uc bundled → prompt", () => {
+      expectPrompt(cmd("python3", "-uc", "import os"))
+    })
+
+    test("-m module → allow (unchanged)", () => {
+      expectAllow(cmd("python3", "-m", "http.server"))
+    })
+
+    test("-W ignore → allow", () => {
+      expectAllow(cmd("python3", "-W", "ignore", "script.py"))
+    })
+
+    test("-X importtime → allow", () => {
+      expectAllow(cmd("python3", "-X", "importtime", "script.py"))
+    })
+  })
+})
