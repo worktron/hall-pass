@@ -154,16 +154,14 @@ export const INSPECTORS: Record<string, Inspector> = {
   // -- Commands with dangerous flag variants --
 
   perl: (cmdInfo) => {
-    for (const arg of cmdInfo.args) {
-      if (arg === "-e" || arg === "-E") return prompt("perl: inline code", "Perl -e runs arbitrary inline code")
-    }
+    if (hasInlineCode(cmdInfo.args, PERL_INLINE))
+      return prompt("perl: inline code", "Perl -e runs arbitrary inline code")
     return allow("perl: script runner")
   },
 
   ruby: (cmdInfo) => {
-    for (const arg of cmdInfo.args) {
-      if (arg === "-e") return prompt("ruby: inline code", "Ruby -e runs arbitrary inline code")
-    }
+    if (hasInlineCode(cmdInfo.args, RUBY_INLINE))
+      return prompt("ruby: inline code", "Ruby -e runs arbitrary inline code")
     return allow("ruby: script runner")
   },
 
@@ -326,25 +324,20 @@ export const INSPECTORS: Record<string, Inspector> = {
   },
 
   node: (cmdInfo) => {
-    for (const arg of cmdInfo.args) {
-      if (arg === "-e" || arg === "--eval" || arg === "-p" || arg === "--print") {
-        return prompt("node: inline code", "Node -e/--eval runs arbitrary inline code")
-      }
-    }
+    if (hasInlineCode(cmdInfo.args, NODE_INLINE))
+      return prompt("node: inline code", "Node -e/--eval runs arbitrary inline code")
     return allow("node: script runner")
   },
 
   python: (cmdInfo) => {
-    for (const arg of cmdInfo.args) {
-      if (arg === "-c") return prompt("python: inline code", "Python -c runs arbitrary inline code")
-    }
+    if (hasInlineCode(cmdInfo.args, PYTHON_INLINE))
+      return prompt("python: inline code", "Python -c runs arbitrary inline code")
     return allow("python: script runner")
   },
 
   python3: (cmdInfo) => {
-    for (const arg of cmdInfo.args) {
-      if (arg === "-c") return prompt("python3: inline code", "Python -c runs arbitrary inline code")
-    }
+    if (hasInlineCode(cmdInfo.args, PYTHON_INLINE))
+      return prompt("python3: inline code", "Python -c runs arbitrary inline code")
     return allow("python3: script runner")
   },
 
@@ -939,6 +932,88 @@ export const INSPECTORS: Record<string, Inspector> = {
     }
     return allow("code: opens editor")
   },
+}
+
+/**
+ * How one interpreter spells "run this string as code".
+ *
+ * These options are matched with getopt rules, not by exact token. Checking
+ * `arg === "-e"` misses both `-e'code'` (value attached to the flag) and
+ * `-ne code` (code letter bundled behind another short flag) — and every
+ * interpreter here accepts both spellings.
+ */
+interface InlineCodeSpec {
+  /** Short letters whose value is code to execute. */
+  codeLetters: Set<string>
+  /** Short letters that consume the rest of the token as their value. */
+  valueLetters: Set<string>
+  /** Short letters taking an OPTIONAL numeric value, after which parsing continues. */
+  numericLetters: Set<string>
+  /** Long options whose value is code, in both `--opt value` and `--opt=value` form. */
+  longFlags: Set<string>
+}
+
+// perl: -e and -E both eval. -0/-l/-C take optional octal and parsing continues
+// after the digits, which is what makes `-0777pe` three separate options.
+const PERL_INLINE: InlineCodeSpec = {
+  codeLetters: new Set(["e", "E"]),
+  valueLetters: new Set(["F", "i", "I", "m", "M", "x", "S", "D"]),
+  numericLetters: new Set(["0", "l", "C"]),
+  longFlags: new Set(),
+}
+
+// ruby: only -e evals. Note -E is an ENCODING flag here, unlike perl.
+const RUBY_INLINE: InlineCodeSpec = {
+  codeLetters: new Set(["e"]),
+  valueLetters: new Set(["C", "E", "F", "I", "K", "r", "T", "W", "x", "S"]),
+  numericLetters: new Set(["0"]),
+  longFlags: new Set(),
+}
+
+// node: -p/--print evaluates and prints, same exposure as -e/--eval.
+const NODE_INLINE: InlineCodeSpec = {
+  codeLetters: new Set(["e", "p"]),
+  valueLetters: new Set(["r", "C"]),
+  numericLetters: new Set(),
+  longFlags: new Set(["--eval", "--print"]),
+}
+
+// python: -c only. -m runs a module, which stays allowed as before.
+const PYTHON_INLINE: InlineCodeSpec = {
+  codeLetters: new Set(["c"]),
+  valueLetters: new Set(["m", "Q", "W", "X"]),
+  numericLetters: new Set(),
+  longFlags: new Set(),
+}
+
+/** Does this invocation carry an inline-code flag, in any spelling? */
+function hasInlineCode(args: string[], spec: InlineCodeSpec): boolean {
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === "--") break            // everything after is the script and its args
+    if (arg === "-" || !arg.startsWith("-")) continue
+
+    if (arg.startsWith("--")) {
+      const name = arg.split("=")[0]!
+      if (spec.longFlags.has(name)) return true
+      continue
+    }
+
+    // Short-option bundle: walk it letter by letter with getopt rules.
+    for (let c = 1; c < arg.length; c++) {
+      const letter = arg[c]!
+      if (spec.codeLetters.has(letter)) return true
+      if (spec.numericLetters.has(letter)) {
+        // Consume an optional numeric argument, then keep walking the bundle.
+        while (c + 1 < arg.length && arg[c + 1]! >= "0" && arg[c + 1]! <= "9") c++
+        continue
+      }
+      // Any other value-taking letter swallows the rest of the token, so a
+      // later `e` there is part of its value (`-Mfeature`), not a code flag.
+      if (spec.valueLetters.has(letter)) break
+    }
+  }
+  return false
 }
 
 interface SedParse {

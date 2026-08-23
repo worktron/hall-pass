@@ -475,3 +475,47 @@ describe("adversarial: mixed evasion", () => {
     }
   })
 })
+
+describe("adversarial: inline-code flags in non-obvious spellings", () => {
+  // Each of these ran arbitrary code with no prompt, because the guards
+  // compared whole tokens instead of parsing short-option bundles.
+  const prompted = [
+    `perl -e'system("id")'`,
+    `perl -ne 'system("id")' /dev/null`,
+    `perl -pe 'unlink("/tmp/x")' f.txt`,
+    `perl -lne 'system("id")' /dev/null`,
+    `perl -ane 'system("id")' /dev/null`,
+    `perl -0777pe 'system("id")' f.txt`,
+    `ruby -e'system("id")'`,
+    `ruby -ne 'system("id")' /dev/null`,
+    `node -e'require("child_process").execSync("id")'`,
+    `node --eval='require("child_process").execSync("id")'`,
+    `node -pe 'process.mainModule.require("child_process").execSync("id")'`,
+    `python3 -c'import os; os.system("id")'`,
+    `python3 -Bc 'import os; os.system("id")'`,
+    `python3 -uc 'import os; os.system("id")'`,
+  ]
+
+  for (const cmd of prompted) {
+    test(cmd, async () => {
+      expectPrompt(await runHook(cmd))
+    })
+  }
+
+  // An "e"/"c" inside another option's value must not trigger a prompt.
+  const allowed = [
+    "perl -Mfeature script.pl",
+    "perl -pi.backup script.pl",
+    "ruby -Eutf-8 script.rb",
+    "ruby -Ilib -rerb script.rb",
+    "node -r dotenv/config app.js",
+    "python3 -m http.server",
+    "python3 -W ignore script.py",
+  ]
+
+  for (const cmd of allowed) {
+    test(cmd, async () => {
+      expectAllow(await runHook(cmd))
+    })
+  }
+})
