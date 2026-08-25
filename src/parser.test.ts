@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { resolve } from "path"
 import { existsSync } from "fs"
-import { extractCommands, extractRedirects, extractPipeTargets, type RedirectInfo } from "./parser.ts"
+import { extractCommands, extractCommandInfos, extractRedirects, extractPipeTargets, type RedirectInfo } from "./parser.ts"
 
 const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
 const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
@@ -206,5 +206,84 @@ describe("extractRedirects", () => {
     // checkFilePath skips it (no glob will match the literal "1").
     const redirs = await redirectsIn("echo hi 2>&1")
     expect(redirs).toEqual([{ path: "1", op: "read" }])
+  })
+})
+
+describe("heredoc and herestring stdin", () => {
+  const Q = "'"
+
+  /** Parse a command and return the stdin text attached to the named command. */
+  async function stdinOf(command: string, name: string): Promise<string | undefined> {
+    const infos = extractCommandInfos(await astOf(command))
+    return infos.find((c) => c.name === name)?.stdin
+  }
+
+  test("captures a quoted-delimiter heredoc body", async () => {
+    const cmd = `psql db <<${Q}EOF${Q}\nselect 1;\nEOF\n`
+    expect(await stdinOf(cmd, "psql")).toBe("select 1;\n")
+  })
+
+  test("captures a <<- (tab-stripping) heredoc body", async () => {
+    const cmd = `psql db <<-${Q}EOF${Q}\nselect 1;\nEOF\n`
+    expect(await stdinOf(cmd, "psql")).toBe("select 1;\n")
+  })
+
+  test("captures a herestring", async () => {
+    expect(await stdinOf(`psql db <<<"select 1"`, "psql")).toBe("select 1")
+  })
+
+  test("captures a multi-line body with meta-commands", async () => {
+    const cmd = `psql db <<${Q}EOF${Q}\n\\echo hi\nselect 1;\nEOF\n`
+    expect(await stdinOf(cmd, "psql")).toBe("\\echo hi\nselect 1;\n")
+  })
+
+  test("is undefined when there is no heredoc", async () => {
+    expect(await stdinOf(`psql db -c "select 1"`, "psql")).toBeUndefined()
+  })
+
+  test("is undefined for a file redirect — that content is on disk", async () => {
+    expect(await stdinOf(`psql db < query.sql`, "psql")).toBeUndefined()
+  })
+
+  test("attaches to the leftmost command, not the pipe target", async () => {
+    const cmd = `psql db <<${Q}EOF${Q} | head\nselect 1;\nEOF\n`
+    expect(await stdinOf(cmd, "psql")).toBe("select 1;\n")
+    expect(await stdinOf(cmd, "head")).toBeUndefined()
+  })
+
+  test("still finds commands that have no redirects", async () => {
+    expect(await commandsIn("ls -la | grep foo")).toEqual(["ls", "grep"])
+  })
+
+  test("still finds commands alongside a heredoc", async () => {
+    const cmd = `psql db <<${Q}EOF${Q}\nselect 1;\nEOF\necho done\n`
+    expect(await commandsIn(cmd)).toContain("psql")
+    expect(await commandsIn(cmd)).toContain("echo")
+  })
+
+  describe("unquoted delimiters expand — body is not trustworthy", () => {
+    // With an unquoted delimiter the shell expands $VAR and $(cmd) INSIDE the
+    // body. extractWordValue drops those parts, so the text would read as the
+    // whole statement while the shell splices in something else. Report
+    // nothing rather than a misleading partial.
+    test("reports nothing when the body holds a command substitution", async () => {
+      const cmd = "psql db <<EOF\nselect 1; $(cat evil.sql)\nEOF\n"
+      expect(await stdinOf(cmd, "psql")).toBeUndefined()
+    })
+
+    test("reports nothing when the body holds a parameter expansion", async () => {
+      const cmd = "psql db <<EOF\nselect * from $TABLE;\nEOF\n"
+      expect(await stdinOf(cmd, "psql")).toBeUndefined()
+    })
+
+    test("still walks commands substituted into the body", async () => {
+      const cmd = "psql db <<EOF\nselect 1; $(rm -rf /tmp/x)\nEOF\n"
+      expect(await commandsIn(cmd)).toContain("rm")
+    })
+
+    test("an unquoted delimiter with a fully literal body is still read", async () => {
+      const cmd = "psql db <<EOF\nselect 1;\nEOF\n"
+      expect(await stdinOf(cmd, "psql")).toBe("select 1;\n")
+    })
   })
 })

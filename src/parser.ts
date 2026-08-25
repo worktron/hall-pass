@@ -13,6 +13,19 @@ export interface CommandInfo {
   args: string[]
   /** Environment variable assignments on this command, e.g., [{ name: "LD_PRELOAD", value: "evil.so" }] */
   assigns: AssignInfo[]
+  /**
+   * Literal text fed to this command's standard input by a heredoc
+   * (`<<EOF`, `<<-EOF`) or a herestring (`<<<"..."`), when there is one.
+   *
+   * A command can take its real instructions from stdin rather than from
+   * argv — `psql db <<EOF ... EOF` is the usual way to send multi-line SQL.
+   * Inspectors that read args alone see nothing there and have to assume the
+   * worst. Undefined means no heredoc, NOT an empty one.
+   *
+   * `< file.sql` is deliberately absent: that content lives on disk and
+   * would have to be read (and could change before the command runs).
+   */
+  stdin?: string
 }
 
 export interface RedirectInfo {
@@ -45,6 +58,21 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
   const n = node as Record<string, unknown>
   const commands: CommandInfo[] = []
 
+  // Stmt with redirects — the heredoc body hangs off the Stmt, while the
+  // command it feeds is the sibling .Cmd. Handle the pair here so the text
+  // can be attached; walking them independently would lose the association.
+  if (Array.isArray(n.Redirs) && n.Cmd) {
+    const stdin = extractHeredocText(n.Redirs as Array<Record<string, unknown>>)
+    const inner = extractCommandInfos(n.Cmd)
+    // Leftmost command owns the redirect: in `psql <<EOF | head`, the
+    // heredoc feeds psql, not head.
+    if (stdin !== null && inner.length > 0) inner[0]!.stdin = stdin
+    commands.push(...inner)
+    // Redirect targets can themselves contain command substitutions.
+    for (const redir of n.Redirs) commands.push(...extractCommandInfos(redir))
+    return commands
+  }
+
   // CallExpr = a command invocation
   if (n.Type === "CallExpr" && Array.isArray(n.Args) && n.Args.length > 0) {
     const args = (n.Args as Array<Record<string, unknown>>).map(extractWordValue).filter(Boolean) as string[]
@@ -70,6 +98,61 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
   }
 
   return commands
+}
+
+/**
+ * Concatenate the literal text every heredoc/herestring in a Stmt's Redirs
+ * feeds to standard input. Returns null when there is none.
+ *
+ * Op values from shfmt's syntax.RedirOperator (verified against shfmt v3.12+):
+ *   61 = <<    62 = <<-    63 = <<<
+ * << and <<- carry their body in .Hdoc; <<< puts its string in .Word.
+ * Only FULLY LITERAL bodies are returned. A quoted delimiter (`<<'EOF'`)
+ * suppresses expansion and yields one literal — the common case, and the
+ * only one that can be read with confidence. An unquoted delimiter expands
+ * `$VAR` and `$(cmd)` inside the body, and extractWordValue drops those
+ * parts silently; the resulting text would look like the whole story while
+ * the shell splices in something else at runtime. Such a body reports null
+ * (unreadable), so callers keep whatever they do when there is no heredoc
+ * at all. The substituted commands are still walked separately.
+ */
+function extractHeredocText(redirs: Array<Record<string, unknown>>): string | null {
+  const bodies: string[] = []
+
+  for (const redir of redirs) {
+    const op = redir.Op as number | undefined
+    // << and <<- carry the body in .Hdoc; <<< puts its string in .Word.
+    const source =
+      op === 61 || op === 62 ? redir.Hdoc :
+      op === 63 ? redir.Word :
+      undefined
+    if (!source || typeof source !== "object") continue
+
+    const word = source as Record<string, unknown>
+    if (!isFullyLiteral(word)) return null
+
+    const text = extractWordValue(word)
+    if (text !== null) bodies.push(text)
+  }
+
+  return bodies.length > 0 ? bodies.join("\n") : null
+}
+
+/**
+ * True when a Word is made only of literal text — no parameter expansion,
+ * command substitution, or arithmetic. Quoted segments count as literal
+ * provided their own contents are.
+ */
+function isFullyLiteral(word: Record<string, unknown>): boolean {
+  const parts = word.Parts as Array<Record<string, unknown>> | undefined
+  if (!parts) return false
+
+  return parts.every((part) => {
+    if (part.Type === "Lit") return true
+    if (part.Type === "SglQuoted") return true  // no expansion inside '...'
+    if (part.Type === "DblQuoted") return isFullyLiteral(part)
+    return false
+  })
 }
 
 /**
