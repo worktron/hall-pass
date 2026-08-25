@@ -930,3 +930,63 @@ describe("confiscate-notes 2026-08 — new inspectors end-to-end", () => {
     })
   }
 })
+
+describe("psql SQL delivered by heredoc", () => {
+  const Q = "'"
+  const heredoc = (body: string) => `psql "postgresql://localhost:5432/app" -X -A <<${Q}EOF${Q}\n${body}\nEOF`
+
+  describe("should ALLOW — read-only heredoc scripts", () => {
+    const cases: [string, string][] = [
+      ["plain selects", "select a from t;\nselect b from u;"],
+      ["meta-commands interleaved with selects", "\\echo === one ===\nselect a from t;\n\\echo === two ===\nselect max(b) from t;"],
+      ["a statement split across lines", "select a,\n       b\n  from t\n where a > 1;"],
+      ["\\dt then a select", "\\dt\nselect 1;"],
+    ]
+
+    for (const [label, body] of cases) {
+      test(label, async () => {
+        const result = await runHook(heredoc(body))
+        expect(result.exitCode).toBe(0)
+        expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("allow")
+      })
+    }
+
+    test("herestring", async () => {
+      const result = await runHook(`psql db <<<"select 1"`)
+      expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("allow")
+    })
+  })
+
+  describe("should PROMPT — heredoc scripts that write or escape", () => {
+    const cases: [string, string][] = [
+      ["DROP TABLE", "DROP TABLE users;"],
+      ["a DELETE after a select", "select 1;\nDELETE FROM t;"],
+      ["shell escape", "\\! rm -rf /"],
+      ["\\copy to a file", "\\copy t TO '/tmp/x.csv'"],
+      ["output redirected to a shell pipeline", "select 1;\n\\g | sh"],
+      ["a data-modifying CTE", "WITH x AS (DELETE FROM t RETURNING id) SELECT * FROM x;"],
+    ]
+
+    for (const [label, body] of cases) {
+      test(label, async () => {
+        const result = await runHook(heredoc(body))
+        expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("ask")
+      })
+    }
+
+    test("herestring containing a write", async () => {
+      const result = await runHook(`psql db <<<"DROP TABLE t"`)
+      expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("ask")
+    })
+
+    test("unquoted delimiter with a command substitution in the body", async () => {
+      const result = await runHook("psql db <<EOF\nselect 1; $(cat evil.sql)\nEOF")
+      expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("ask")
+    })
+
+    test("inline -c read-only but heredoc writes", async () => {
+      const result = await runHook(`psql db -c "select 1" <<${Q}EOF${Q}\nDROP TABLE t;\nEOF`)
+      expect(JSON.parse(result.stdout).hookSpecificOutput.permissionDecision).toBe("ask")
+    })
+  })
+})

@@ -129,12 +129,27 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
 
 /**
  * Generic DB client inspector — extracts SQL and checks read-only.
+ *
+ * SQL reaches a client two ways: inline on the command line (`-c`, `-e`, a
+ * positional) or on standard input, which in practice means a heredoc:
+ *
+ *   psql "$DB" -X <<'EOF'
+ *   select ... ;
+ *   EOF
+ *
+ * Only the first was ever read. A heredoc is a redirect rather than an
+ * argument, so extractSqlFromArgs returned null and every such command
+ * prompted — not because the SQL looked risky, but because nothing looked
+ * at it. Heredoc SQL is now checked by the same read-only rules.
+ *
+ * Both sources are checked when both are present.
  */
 function dbClientInspect(cmdInfo: CommandInfo): EvalResult {
-  const { name, args } = cmdInfo
-  const sql = extractSqlFromArgs(name, args)
-  const readOnly = sql ? isSqlReadOnly(sql) : false
-  if (sql && readOnly) {
+  const { name, args, stdin } = cmdInfo
+  const inlineSql = extractSqlFromArgs(name, args)
+
+  const sources = [inlineSql, stdin].filter((s): s is string => s !== null && s !== undefined)
+  if (sources.length > 0 && sources.every(isSqlReadOnly)) {
     return { decision: "allow", reason: `db read-only: ${name}` }
   }
   return { decision: "prompt", reason: `db client: ${name}`, message: `"${name}" session may modify data` }
