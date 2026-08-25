@@ -26,6 +26,14 @@ export interface CommandInfo {
    * would have to be read (and could change before the command runs).
    */
   stdin?: string
+  /**
+   * True when this command is the right-hand side of a pipe, so its standard
+   * input is whatever the left-hand side produced.
+   *
+   * Distinguishes `curl https://x/a.py | python3 -`, where the program itself
+   * arrives on stdin, from `python3 report.py`, where stdin is only data.
+   */
+  stdinFromPipe?: boolean
 }
 
 export interface RedirectInfo {
@@ -71,6 +79,16 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
     // Redirect targets can themselves contain command substitutions.
     for (const redir of n.Redirs) commands.push(...extractCommandInfos(redir))
     return commands
+  }
+
+  // Pipe (12 = |, 13 = |&) — the right-hand side reads its standard input
+  // from the left. Pipes nest left-associatively, so `a | b | c` is
+  // BinaryCmd(a|b, c) and each level marks its own right-hand command.
+  if (n.Type === "BinaryCmd" && (n.Op === 12 || n.Op === 13)) {
+    const left = extractCommandInfos(n.X)
+    const right = extractCommandInfos(n.Y)
+    if (right.length > 0) right[0]!.stdinFromPipe = true
+    return [...left, ...right]
   }
 
   // CallExpr = a command invocation
