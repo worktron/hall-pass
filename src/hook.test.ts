@@ -367,20 +367,42 @@ describe("hook integration", () => {
     }
   })
 
-  describe("sqlite3 — should ALLOW all (local file-based DB)", () => {
-    const allowed = [
-      `sqlite3 db.sqlite "SELECT * FROM users"`,
-      `sqlite3 -header -column db.sqlite "SELECT count(*) FROM orders"`,
-      `sqlite3 db.sqlite "DROP TABLE users"`,
-      `sqlite3 db.sqlite "INSERT INTO users VALUES (1, 'test')"`,
-      `sqlite3 db.sqlite`,
-    ]
+  describe("sqlite3 — SQL is inspected like any other DB client", () => {
+    // sqlite3 used to sit in SAFE_COMMANDS, so every invocation was
+    // auto-approved no matter what SQL it carried.
+    describe("should ALLOW — read-only", () => {
+      const allowed = [
+        `sqlite3 db.sqlite "SELECT * FROM users"`,
+        `sqlite3 -header -column db.sqlite "SELECT count(*) FROM orders"`,
+        `sqlite3 db.sqlite ".tables"`,
+        `sqlite3 db.sqlite ".schema users"`,
+      ]
 
-    for (const cmd of allowed) {
-      test(cmd, async () => {
-        expectAllow(await runHook(cmd))
-      })
-    }
+      for (const cmd of allowed) {
+        test(cmd, async () => {
+          expectAllow(await runHook(cmd))
+        })
+      }
+    })
+
+    describe("should PROMPT — writes, file access, and shell escapes", () => {
+      const prompted = [
+        `sqlite3 db.sqlite "DROP TABLE users"`,
+        `sqlite3 db.sqlite "INSERT INTO users VALUES (1, 'test')"`,
+        `sqlite3 db.sqlite "DELETE FROM users"`,
+        `sqlite3 db.sqlite ".shell rm -rf /tmp/x"`,
+        `sqlite3 db.sqlite ".system id"`,
+        `sqlite3 db.sqlite ".import /etc/passwd users"`,
+        `sqlite3 db.sqlite ".output /tmp/pwned.txt"`,
+        `sqlite3 db.sqlite`,   // interactive session — nothing to inspect
+      ]
+
+      for (const cmd of prompted) {
+        test(cmd, async () => {
+          expectPrompt(await runHook(cmd))
+        })
+      }
+    })
   })
 
   test("invalid JSON input falls through", async () => {

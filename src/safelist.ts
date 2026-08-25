@@ -102,9 +102,6 @@ export const SAFE_COMMANDS = new Set([
   // ── Container tools ──────────────────────────────────────────────────
   "docker-compose",
 
-  // ── Local databases (file-based) ─────────────────────────────────────
-  "sqlite3",
-
   // ── Postgres utilities (no SQL execution) ────────────────────────────
   "pg_isready",
 ])
@@ -117,6 +114,11 @@ export const SAFE_COMMANDS = new Set([
 export const DB_CLIENTS = new Set([
   "psql",
   "mysql",
+  // File-based, but it still executes whatever SQL it is handed. It sat in
+  // SAFE_COMMANDS, which auto-approved `sqlite3 app.db "DROP TABLE users"`
+  // and left the whole of sqlite.ts — plus the sqlite3 branch of
+  // extractSqlFromArgs — unreachable.
+  "sqlite3",
 ])
 
 /**

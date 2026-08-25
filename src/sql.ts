@@ -227,7 +227,13 @@ function isPlainSqlReadOnly(sql: string): boolean {
     if (statements.length === 0) return true
     return statements.every(isStatementReadOnly)
   } catch {
-    // Can't parse = can't guarantee safety = prompt
+    // Can't parse = can't guarantee safety = prompt.
+    //
+    // pgsql-ast-parser speaks Postgres, so some perfectly read-only SQLite
+    // queries land here — an unaliased subquery in FROM (which Postgres also
+    // rejects) and certain arithmetic like `WHERE ts BETWEEN r.ts-180 AND
+    // r.ts`. Those prompt rather than resolve, which is the safe direction;
+    // measured at roughly 5 of 54 real sqlite3 invocations.
     return false
   }
 }
