@@ -68,6 +68,8 @@ const SAFE_SQLITE_DOT_COMMANDS = new Set([
 export function isSqliteDotCommandSafe(input: string): boolean {
   const trimmed = input.trim()
   if (!trimmed.startsWith(".")) return false
+  // One line only — `.tables\nDROP TABLE users;` must not pass as ".tables".
+  if (trimmed.includes("\n")) return false
 
   // Extract the command name: everything after . up to the first space
   const rest = trimmed.slice(1)

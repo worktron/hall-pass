@@ -214,33 +214,72 @@ export function extractSqlFromPsql(command: string): string | null {
 }
 
 /**
- * Check if a SQL string contains only read-only statements.
+ * Check a chunk that is plain SQL — no meta-commands mixed in.
  */
-export function isSqlReadOnly(sql: string): boolean {
-  const trimmed = sql.trim()
-  if (!trimmed) return true
-
-  // psql meta-commands start with backslash — not parseable as SQL
-  if (trimmed.startsWith("\\")) {
-    return isPsqlMetaCommandSafe(trimmed)
-  }
-
-  // SQLite dot-commands start with . — not parseable as SQL
-  if (trimmed.startsWith(".")) {
-    return isSqliteDotCommandSafe(trimmed)
-  }
-
+function isPlainSqlReadOnly(sql: string): boolean {
   // SQLite PRAGMAs — not parseable by pgsql-ast-parser
-  if (/^pragma\s/i.test(trimmed)) {
-    return isSqlitePragmaReadOnly(trimmed)
+  if (/^pragma\s/i.test(sql)) {
+    return isSqlitePragmaReadOnly(sql)
   }
 
   try {
-    const statements = parse(trimmed)
+    const statements = parse(sql)
     if (statements.length === 0) return true
     return statements.every(isStatementReadOnly)
   } catch {
     // Can't parse = can't guarantee safety = prompt
     return false
   }
+}
+
+/**
+ * Check a whole client script, which interleaves meta-commands with SQL.
+ *
+ * psql scripts mix backslash commands with statements, sqlite3 scripts mix
+ * dot-commands with them, and both arrive as one blob — from `-c`, and (once
+ * the parser forwards them) from heredocs. This used to branch on the FIRST
+ * character of the blob and hand the ENTIRE thing to one checker, so a script
+ * opening with a safe meta-command was approved wholesale:
+ *
+ *   \dt
+ *   DROP TABLE users;     <- rode along on \dt's approval
+ *
+ * Now each line is classified on its own: meta-command lines go to their
+ * checker, runs of ordinary lines are gathered and parsed as SQL. Every
+ * part has to pass.
+ */
+function isClientScriptReadOnly(script: string): boolean {
+  let sqlLines: string[] = []
+
+  // Parse and clear whatever plain SQL has accumulated.
+  const sqlChunkOk = (): boolean => {
+    const sql = sqlLines.join("\n").trim()
+    sqlLines = []
+    return sql === "" || isPlainSqlReadOnly(sql)
+  }
+
+  for (const line of script.split("\n")) {
+    const trimmed = line.trim()
+
+    if (trimmed.startsWith("\\")) {
+      if (!sqlChunkOk()) return false
+      if (!isPsqlMetaCommandSafe(trimmed)) return false
+    } else if (trimmed.startsWith(".")) {
+      if (!sqlChunkOk()) return false
+      if (!isSqliteDotCommandSafe(trimmed)) return false
+    } else {
+      sqlLines.push(line)
+    }
+  }
+
+  return sqlChunkOk()
+}
+
+/**
+ * Check if a SQL string contains only read-only statements.
+ */
+export function isSqlReadOnly(sql: string): boolean {
+  const trimmed = sql.trim()
+  if (!trimmed) return true
+  return isClientScriptReadOnly(trimmed)
 }
