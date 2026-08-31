@@ -16,7 +16,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "install": "bun src/install.ts",
+    "setup": "bun src/install.ts",
     "uninstall": "bun src/uninstall.ts",
     "test": "bun test",
     "stats": "bun src/stats.ts",

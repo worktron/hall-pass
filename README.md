@@ -121,7 +121,7 @@ hall-pass-install
 git clone https://github.com/worktron/hall-pass.git
 cd hall-pass
 bun install
-bun run install
+bun run setup
 ```
 
 This downloads [shfmt](https://github.com/mvdan/sh) (used to parse Bash commands), registers hooks for Bash, Write, and Edit tools in `~/.claude/settings.json`, and sets up non-Bash tool permissions (Read, Glob, Grep, WebFetch, WebSearch).
@@ -145,8 +145,8 @@ Configuration is **optional** — everything works with zero config. To customiz
 ```bash
 # Generate default config with comments
 hall-pass-init
-# Or with the install command
-bun run install --init
+# Or with the setup command
+bun run setup --init
 ```
 
 Config location: `~/.config/hall-pass/config.toml` (override with `HALL_PASS_CONFIG` env var).
