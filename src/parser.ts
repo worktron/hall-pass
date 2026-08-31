@@ -296,27 +296,45 @@ function extractAssigns(node: Record<string, unknown>): AssignInfo[] {
 
 /**
  * Extract the string value from a shfmt Word node.
- * Concatenates all Lit parts (ignores complex expansions).
+ *
+ * Literal parts contribute their text. Expansions contribute a PLACEHOLDER
+ * (`$NAME`, `$(...)`, `$((...))`) rather than nothing: a word that renders
+ * empty is dropped from the argument list, which shifts every argument after
+ * it one slot to the left. `git -C $CL fetch origin` then reads as
+ * `git -C fetch origin` — `-C` swallows `fetch` and the subcommand becomes
+ * `origin` — and `git -C $D reset --hard` reads as bare `git`, which is safe.
+ * Keeping the slot keeps the shape, and `$CL` cannot match a protected path
+ * glob or a protected branch name, so a placeholder never makes a command
+ * look safer than an unknown value should.
  */
 function extractWordValue(word: Record<string, unknown>): string | null {
   const parts = word?.Parts as Array<Record<string, unknown>> | undefined
   if (!parts) return null
 
   let result = ""
-  for (const part of parts) {
-    if (part.Value !== undefined) {
-      result += String(part.Value)
-    } else if (part.Type === "DblQuoted" || part.Type === "SglQuoted") {
-      // Quoted string — recurse into its parts
-      const innerParts = part.Parts as Array<Record<string, unknown>> | undefined
-      if (innerParts) {
-        for (const inner of innerParts) {
-          if (inner.Value !== undefined) result += String(inner.Value)
-        }
-      }
-      if (part.Value !== undefined) result += String(part.Value)
-    }
-  }
-
+  for (const part of parts) result += partText(part)
   return result || null
+}
+
+function partText(part: Record<string, unknown>): string {
+  if (part.Value !== undefined) return String(part.Value)
+  switch (part.Type) {
+    case "DblQuoted":
+    case "SglQuoted": {
+      const inner = part.Parts as Array<Record<string, unknown>> | undefined
+      return inner ? inner.map(partText).join("") : ""
+    }
+    case "ParamExp": {
+      const name = (part.Param as Record<string, unknown> | undefined)?.Value
+      return name !== undefined ? `$${String(name)}` : "${...}"
+    }
+    case "CmdSubst":
+      return "$(...)"
+    case "ArithmExp":
+      return "$((...))"
+    case "ProcSubst":
+      return "<(...)"
+    default:
+      return ""
+  }
 }

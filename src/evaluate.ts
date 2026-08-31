@@ -17,7 +17,7 @@
 
 import type { CommandInfo } from "./parser.ts"
 import type { HallPassConfig } from "./config.ts"
-import { SAFE_COMMANDS, DANGEROUS_COMMANDS, DB_CLIENTS, DANGEROUS_ENV_VARS } from "./safelist.ts"
+import { SAFE_COMMANDS, DANGEROUS_COMMANDS, DB_CLIENTS, DANGEROUS_ENV_VARS, INJECTION_ENV_VARS } from "./safelist.ts"
 import { INSPECTORS } from "./inspectors.ts"
 import { unwrapCommand } from "./wrappers.ts"
 import { isPathAwareCommand, checkCommandPaths } from "./paths.ts"
@@ -26,7 +26,14 @@ import { extractSqlFromArgs, isSqlReadOnly } from "./sql.ts"
 
 export type EvalResult =
   | { decision: "allow"; reason: string }
-  | { decision: "prompt"; reason: string; message: string }
+  /**
+   * `hard` marks a prompt that stands in every permission mode: protected
+   * paths, code injection, pushes to protected branches. Every other prompt
+   * is a judgment call about intent, and in a mode where Claude Code has its
+   * own reviewer (auto mode's classifier) decide.ts hands it over instead of
+   * forcing the user to answer — see DEFER_MODES there.
+   */
+  | { decision: "prompt"; reason: string; message: string; hard?: boolean }
   | { decision: "pass"; reason: string }
   | { decision: "feedback"; suggestion: string }
 
@@ -84,7 +91,12 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
   // 2. Check env var assignments for dangerous variables
   for (const assign of cmdInfo.assigns) {
     if (DANGEROUS_ENV_VARS.has(assign.name)) {
-      return { decision: "prompt", reason: `dangerous env: ${assign.name}`, message: `Sets dangerous variable "${assign.name}"` }
+      return {
+        decision: "prompt",
+        reason: `dangerous env: ${assign.name}`,
+        message: `Sets dangerous variable "${assign.name}"`,
+        hard: INJECTION_ENV_VARS.has(assign.name),
+      }
     }
   }
 
@@ -98,7 +110,7 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
   if (isPathAwareCommand(name)) {
     const pathDecision = checkCommandPaths(cmdInfo, ctx.config)
     if (!pathDecision.allowed) {
-      return { decision: "prompt", reason: `path-blocked: ${name} ${pathDecision.reason}`, message: `"${name}" targets ${pathDecision.reason}` }
+      return { decision: "prompt", reason: `path-blocked: ${name} ${pathDecision.reason}`, message: `"${name}" targets ${pathDecision.reason}`, hard: true }
     }
   }
 

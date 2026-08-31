@@ -141,10 +141,12 @@ export const DANGEROUS_COMMANDS = new Set([
 ])
 
 /**
- * Environment variables that should never be set as command prefixes.
- * These can inject code into otherwise-safe commands.
+ * Environment variables that load or run code inside an otherwise-safe
+ * command. Setting one is code injection, not a judgment call, so it prompts
+ * in every permission mode — the auto-mode classifier never gets to wave it
+ * through (see decide.ts).
  */
-export const DANGEROUS_ENV_VARS = new Set([
+export const INJECTION_ENV_VARS = new Set([
   "LD_PRELOAD",
   "LD_LIBRARY_PATH",
   "DYLD_INSERT_LIBRARIES",  // macOS equivalent
@@ -152,6 +154,15 @@ export const DANGEROUS_ENV_VARS = new Set([
   "BASH_ENV",
   "ENV",                     // sh equivalent of BASH_ENV
   "PROMPT_COMMAND",
+])
+
+/**
+ * Environment variables that should never be set as command prefixes.
+ * The injection set above, plus hijacking vectors that are usually benign
+ * (`while IFS= read -r line` is the idiom) but worth a look in Manual mode.
+ */
+export const DANGEROUS_ENV_VARS = new Set([
+  ...INJECTION_ENV_VARS,
   // Hijacking attack vectors
   "IFS",                     // field separator injection
   "SHELL",                   // shell override

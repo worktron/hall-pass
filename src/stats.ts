@@ -15,7 +15,7 @@
  */
 
 import { loadConfig } from "./config.ts"
-import { readAuditLog } from "./audit.ts"
+import { readAuditLog, type AuditEntry } from "./audit.ts"
 
 const GAP_MIN_SAMPLES = 3
 
@@ -114,9 +114,28 @@ if (joinable.length === 0) {
   }
 }
 
+// -- Deferred to the classifier --
+
+const isDeferred = (d: AuditEntry) => d.decision === "pass" && (d.reason ?? "").startsWith("deferred: ")
+const deferred = decisions.filter(isDeferred)
+if (deferred.length > 0) {
+  const byOriginal = new Map<string, ReasonStats>()
+  for (const d of deferred) {
+    const reason = (d.reason ?? "").slice("deferred: ".length)
+    const s = byOriginal.get(reason) ?? { total: 0, approved: 0 }
+    s.total++
+    if (d.tool_use_id && completedIds.has(d.tool_use_id)) s.approved++
+    byOriginal.set(reason, s)
+  }
+  console.log(`\nDeferred to the classifier (${deferred.length}; would have prompted in Manual mode — "ran" = the classifier let it through):`)
+  for (const [reason, s] of [...byOriginal.entries()].sort((a, b) => b[1].total - a[1].total)) {
+    console.log(`  ${String(s.approved).padStart(4)}/${String(s.total).padEnd(4)} ran   ${reason}`)
+  }
+}
+
 // -- Abstains and native prompts --
 
-const passes = decisions.filter((d) => d.decision === "pass" && d.tool_use_id)
+const passes = decisions.filter((d) => d.decision === "pass" && d.tool_use_id && !isDeferred(d))
 const passRan = passes.filter((d) => completedIds.has(d.tool_use_id)).length
 console.log(
   `\nAbstains (pass): ${passes.length} joinable, ${passRan} ran anyway (allowed by rules or user)`,

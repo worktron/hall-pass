@@ -23,7 +23,8 @@ export const INSPECTORS: Record<string, Inspector> = {
 
   git: (cmdInfo, ctx) => {
     const decision = checkGitCommand(cmdInfo.args, ctx.protectedBranches, ctx.safeSubcommands)
-    return decision.safe ? allow("git: safe") : prompt(decision.reason, decision.message)
+    if (decision.safe) return allow("git: safe")
+    return { decision: "prompt", reason: decision.reason, message: decision.message, hard: decision.hard }
   },
 
   // -- Commands that proxy other commands --
@@ -231,14 +232,18 @@ export const INSPECTORS: Record<string, Inspector> = {
     // Edit gets in decide.ts: the target path, then the content for secrets.
     // Blanket-prompting instead would be inconsistent with Edit, which
     // auto-approves a write to an unprotected path.
-    if (parsed.uncertain || parsed.files.length === 0) {
+    // A target that is a shell expansion (`sed -i ... $FILE`) renders as a
+    // `$NAME` placeholder (parser.ts): it can't be checked against the
+    // protected paths, so it counts as undetermined.
+    const unverifiable = parsed.files.some((f) => f.includes("$"))
+    if (parsed.uncertain || unverifiable || parsed.files.length === 0) {
       return prompt("sed: -i with unverifiable target", `"sed -i" edits in place and the target file could not be determined`)
     }
 
     for (const file of parsed.files) {
       const decision = checkFilePath(file, "write", ctx.config)
       if (!decision.allowed) {
-        return prompt(`path-blocked: sed ${decision.reason}`, `"sed -i" targets ${decision.reason}`)
+        return { decision: "prompt", reason: `path-blocked: sed ${decision.reason}`, message: `"sed -i" targets ${decision.reason}`, hard: true }
       }
     }
 
