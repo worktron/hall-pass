@@ -78,6 +78,15 @@ function emit(decision: HookDecision): never {
 // -- Read hook input from stdin --
 
 diag("start")
+
+// HALL_PASS=off: stand down for this session — no decision, no audit entry,
+// on every event. The hook stays installed globally in ~/.claude/settings.json;
+// a launcher that wants Claude Code's own review alone (a control plane running
+// many hands-off sessions, say) sets this in the session's environment.
+if (process.env.HALL_PASS === "off") {
+  diag("off (HALL_PASS=off)")
+  process.exit(0)
+}
 let toolName: string
 let toolInput: Record<string, unknown>
 let hookEvent: string
@@ -120,5 +129,5 @@ const debug = createDebug(config)
 const audit = createAudit(config, ctx)
 const shfmtBin = findShfmt()
 
-const decision = await decide(toolName, toolInput, { config, shfmtBin, debug, audit })
+const decision = await decide(toolName, toolInput, { config, shfmtBin, debug, audit, mode: ctx.mode })
 emit(decision)

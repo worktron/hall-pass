@@ -10,7 +10,8 @@
 
 export type GitDecision =
   | { safe: true }
-  | { safe: false; reason: string; message: string }
+  /** `hard`: prompts in every permission mode (see EvalResult in evaluate.ts). */
+  | { safe: false; reason: string; message: string; hard?: boolean }
 
 /**
  * Git subcommands that are always safe (read-only or easily reversible).
@@ -29,8 +30,16 @@ const SAFE_SUBCOMMANDS = new Set([
   // Safe local writes
   "add", "commit", "stash", "fetch", "pull", "merge",
   "cherry-pick", "revert", "notes", "worktree", "mv",
+  // `git rm` only touches TRACKED files, which HEAD still holds — the same
+  // recoverability as `mv`. (`git rm -f` on a modified file loses that
+  // modification, no more than `git checkout -- file` would.)
+  "rm",
+  // Repository creation — a new directory, or a download into one
+  "init", "clone",
   // Patch flow — produce/apply patches & archives, no remote mutation
-  "am", "format-patch", "archive", "bundle", "request-pull",
+  "am", "apply", "format-patch", "archive", "bundle", "request-pull",
+  // Plumbing reads
+  "merge-tree", "hash-object",
 
   // Branch/navigation (without destructive flags)
   "checkout", "switch", "restore",
@@ -141,6 +150,7 @@ function parseGitCommand(args: string[]): { subcommand: string; flags: string[];
  */
 const safe: GitDecision = { safe: true }
 const unsafe = (reason: string, message: string): GitDecision => ({ safe: false, reason, message })
+const hardUnsafe = (reason: string, message: string): GitDecision => ({ safe: false, reason, message, hard: true })
 
 export function checkGitCommand(
   argsOrCommand: string[] | string,
@@ -163,7 +173,7 @@ export function checkGitCommand(
     const key = config.split("=")[0]!.toLowerCase()
     for (const dangerous of DANGEROUS_GIT_CONFIGS) {
       if (key.startsWith(dangerous.toLowerCase())) {
-        return unsafe(`git: dangerous -c config ${key}`, `git -c sets executable config key "${key}"`)
+        return hardUnsafe(`git: dangerous -c config ${key}`, `git -c sets executable config key "${key}"`)
       }
     }
   }
@@ -190,11 +200,26 @@ export function checkGitCommand(
       const key = rest[0]!.toLowerCase()
       for (const dangerous of DANGEROUS_GIT_CONFIGS) {
         if (key.startsWith(dangerous.toLowerCase())) {
-          return unsafe(`git: dangerous config write ${key}`, `git config sets executable key "${key}"`)
+          return hardUnsafe(`git: dangerous config write ${key}`, `git config sets executable key "${key}"`)
         }
       }
     }
     // Single arg = read, or non-dangerous write
+    return safe
+  }
+
+  // git remote — listing and querying is safe; adding, renaming, removing or
+  // repointing a remote is a write. DANGEROUS_GIT_CONFIGS already treats
+  // `remote.*.url` as executable-adjacent (a repointed remote is where the
+  // next fetch/push goes), and `git remote set-url` is the porcelain for the
+  // same change. A judgment call, not a hard stop: auto mode's classifier
+  // distrusts remotes repointed mid-session on its own.
+  if (subcommand === "remote") {
+    const REMOTE_WRITES = new Set(["add", "rename", "remove", "rm", "set-url", "set-head", "set-branches"])
+    const op = rest[0]
+    if (op && REMOTE_WRITES.has(op)) {
+      return unsafe(`git: remote ${op}`, `git remote ${op} changes where fetches and pushes go`)
+    }
     return safe
   }
 
@@ -234,12 +259,17 @@ export function checkGitCommand(
 
   // Branch-gated commands: safe on feature branches, prompt on protected branches.
   // Force flags are only dangerous when targeting a protected branch.
+  // A push to a protected branch is a HARD prompt: the classifier approves
+  // pushes to any branch of the working repo, and a human checkpoint before
+  // main/staging is the whole point of listing them. A rebase onto one is
+  // routine (it is how a branch catches up) and stays a judgment call.
   if (BRANCH_GATED_SUBCOMMANDS.has(subcommand)) {
     const branches = customProtectedBranches ?? PROTECTED_BRANCHES
+    const flag = subcommand === "push" ? hardUnsafe : unsafe
     for (const arg of rest) {
       const target = arg.includes(":") ? arg.split(":").pop()! : arg
       if (branches.has(target)) {
-        return unsafe(`git: ${subcommand} to protected branch ${target}`, `git ${subcommand} to protected branch "${target}"`)
+        return flag(`git: ${subcommand} to protected branch ${target}`, `git ${subcommand} to protected branch "${target}"`)
       }
     }
     return safe

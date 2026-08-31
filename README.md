@@ -32,10 +32,12 @@ Git commands get deeper inspection of subcommands and flags. Safe operations are
 | `git status`, `log`, `diff`, `show`, `branch` | `git push --force`, `push -f` |
 | `git symbolic-ref <ref>` (read) | `git symbolic-ref HEAD <ref>` (repoints HEAD) |
 | `git add`, `commit`, `stash`, `fetch`, `pull` | `git reset --hard` |
-| `git push` (feature branches) | `git clean -f` |
-| `git checkout <branch>`, `switch` | `git checkout .`, `restore .` |
-| `git merge`, `cherry-pick`, `revert` | `git branch -D` |
-| | `git push origin main` (protected branches) |
+| `git rm`, `mv`, `apply`, `init`, `clone` | `git clean -f` |
+| `git push` (feature branches) | `git checkout .`, `restore .` |
+| `git checkout <branch>`, `switch` | `git branch -D` |
+| `git merge`, `cherry-pick`, `revert` | `git push origin main` (protected branches) |
+
+A variable in the command line keeps its place: `git -C $DIR reset --hard` is read as a `reset --hard`, not as bare `git`. (Expansions render as `$NAME` / `$(...)` placeholders in the parsed arguments, which can never match a protected path or branch name.)
 
 ### Layer 3: SQL safety
 
@@ -77,6 +79,28 @@ bun run eval    # replay recorded traffic through the current decide() and diff
 `eval` turns the audit log into a labeled regression corpus for policy changes: edit the safelist/inspectors (or point `HALL_PASS_CONFIG` at a candidate config), replay every recorded decision, and see exactly which real prompts disappear (wins), which allows start prompting (regressions), and — the failure condition — whether any prompt the user did NOT approve would now auto-allow (exit 1). On an unchanged working tree the diff is empty.
 
 A prompt reason that is always approved is a safelist gap; one that is frequently declined is earning its keep. ("Not run" conflates user-denied with interrupted — Claude Code has no hook that reports the user's actual choice.)
+
+## Auto mode: judgment calls go to the classifier
+
+A hook that answers `ask` forces a permission prompt in **every** permission mode — Claude Code's docs say so, and auto mode makes no exception. In auto mode Claude Code has its own reviewer, a classifier that reads the command and the conversation around it and approves routine work silently. So in auto mode an `ask` from hall-pass for a judgment call — is this `rm`, `sudo`, `ssh`, inline `perl`, in-place `sed`, database write, or unknown git subcommand what you meant? — is a prompt that would not otherwise exist.
+
+The audit log from a month of real use said it plainly: in auto mode, a hall-pass `ask` was followed by a visible prompt 76% of the time and a hall-pass `pass` (no opinion) 2% of the time; both ran 96% of the time. hall-pass was the source of nine prompts in ten, and the user approved nearly all of them.
+
+So hall-pass is mode-aware. In `auto` mode (and `bypassPermissions`, which is the user saying "don't ask"), it hands judgment calls to the classifier — it answers nothing, and Claude Code proceeds through its own review. It still answers `ask` for the **hard stops**, in every mode:
+
+- reads, writes, or redirects to protected paths (`~/.ssh`, `.env`, `*.pem`, …)
+- a hardcoded secret in a command or in file content
+- a known data-exfiltration domain
+- piping downloaded content into a shell (`curl … | bash`)
+- code-injecting environment variables (`LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `BASH_ENV`, …)
+- git config keys that execute commands (`core.hooksPath`, …)
+- `git push` to a protected branch (`main`, `staging`, …) — the classifier approves pushes to any branch of the working repo, and a human checkpoint before those branches is the whole point of listing them
+
+In `default` (Manual) and `acceptEdits` mode nothing changes: Claude Code would prompt natively for the same command, so hall-pass's `ask` costs nothing and carries a better message. `allow` decisions are unchanged in every mode — a safelisted command never waits on the classifier.
+
+Deferred decisions are recorded in the audit log as `pass` with reason `deferred: <original reason>`, so `bun run stats` shows what would have prompted in Manual mode and whether the classifier let it through, and `bun run eval` lists what a policy change hands over. To turn this off and prompt for everything as before, set `[classifier] defer = false` in the config.
+
+To take hall-pass out of a single session entirely — every decision left to Claude Code, no audit entries — start that session with `HALL_PASS=off` in its environment. The hook stays installed for everything else. This is the switch for a launcher that runs many hands-off sessions and wants Claude Code's own review alone.
 
 ## Setup
 
@@ -154,6 +178,11 @@ enabled = true
 # Log file path (default: ~/.config/hall-pass/audit.jsonl)
 path = "~/.config/hall-pass/audit.jsonl"
 
+[classifier]
+# In auto mode (and bypassPermissions), hand judgment calls to Claude Code's
+# classifier instead of forcing a prompt. Hard stops always prompt. Default true.
+defer = true
+
 [debug]
 # Enable debug output to stderr
 enabled = true
@@ -190,7 +219,7 @@ When enabled, writes one JSON line per decision to `~/.config/hall-pass/audit.js
 {"ts":"2025-01-15T10:30:01.000Z","tool":"Write","input":"/project/.env","decision":"prompt","reason":"matches protected path **/.env","layer":"paths"}
 ```
 
-Fields: `ts` (ISO 8601), `tool` (Bash/Write/Edit), `input` (command or file path), `decision` (allow/prompt), `reason` (human-readable), `layer` (safelist/git/sql/paths/unknown).
+Fields: `ts` (ISO 8601), `tool` (Bash/Write/Edit), `input` (command or file path), `decision` (allow/prompt/pass/feedback), `reason` (human-readable; a judgment call handed to the auto-mode classifier is a `pass` with reason `deferred: <what would have prompted>`), `layer` (safelist/git/sql/paths/classifier/unknown), plus `session`, `mode` (Claude Code's permission mode), and `tool_use_id`.
 
 ## How the hook decides
 
@@ -221,7 +250,12 @@ Input from Claude Code: { tool_name, tool_input }
                |          read-only? → allow
                |          write? → prompt
                |
-               +-- unknown → prompt
+               +-- unknown → pass (no opinion; Claude Code decides)
+               |
+               Then, in auto mode / bypassPermissions:
+                 hard stop (protected path, secret, injection,
+                 push to protected branch)? → prompt, as in every mode
+                 any other prompt?          → pass — the classifier judges it
 ```
 
 ## Project structure
@@ -229,6 +263,8 @@ Input from Claude Code: { tool_name, tool_input }
 ```
 src/
   hook.ts        Entry point — reads stdin, routes by tool, checks all layers
+  decide.ts      The decision: pre-parse hard stops, per-command evaluation,
+                 auto-mode deferral (DEFER_MODES)
   parser.ts      AST walker — extracts command names from shfmt JSON
   safelist.ts    Safe commands, inspected commands, DB clients
   git.ts         Git subcommand + flag safety checker

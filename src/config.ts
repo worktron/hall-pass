@@ -17,6 +17,13 @@ export interface HallPassConfig {
   paths: { protected: string[]; read_only: string[]; no_delete: string[] };
   audit: { enabled: boolean; path: string };
   debug: { enabled: boolean };
+  /**
+   * defer: in permission modes where Claude Code has its own reviewer (auto
+   * mode's classifier), hand judgment-call prompts to it instead of forcing
+   * the user to answer. Hard stops (protected paths, secrets, code injection,
+   * pushes to protected branches) prompt regardless. See decide.ts.
+   */
+  classifier: { defer: boolean };
 }
 
 /** Default protected path patterns — always active even without config. */
@@ -48,6 +55,7 @@ const DEFAULT_CONFIG: HallPassConfig = {
     path: resolve(homedir(), ".config", "hall-pass", "audit.jsonl"),
   },
   debug: { enabled: false },
+  classifier: { defer: true },
 };
 
 /** Expand ~ to the user's home directory in a path string. */
@@ -86,6 +94,7 @@ function mergeConfig(
   const paths = user.paths as Partial<Record<string, string[]>> | undefined;
   const audit = user.audit as Partial<Record<string, unknown>> | undefined;
   const debug = user.debug as Partial<Record<string, unknown>> | undefined;
+  const classifier = user.classifier as Partial<Record<string, unknown>> | undefined;
 
   return {
     commands: {
@@ -120,6 +129,9 @@ function mergeConfig(
     },
     debug: {
       enabled: (debug?.enabled as boolean) ?? defaults.debug.enabled,
+    },
+    classifier: {
+      defer: (classifier?.defer as boolean) ?? defaults.classifier.defer,
     },
   };
 }
@@ -227,6 +239,15 @@ export function generateDefaultConfig(): string {
 # enabled = false
 # Audit log file path (default: ~/.config/hall-pass/audit.jsonl)
 # path = "~/.config/hall-pass/audit.jsonl"
+
+[classifier]
+# In auto mode (and bypassPermissions), judgment-call prompts — rm, sudo,
+# ssh, inline perl/python, in-place sed, database writes, unknown git
+# subcommands — are handed to Claude Code's own classifier instead of
+# forcing a prompt (a hook "ask" prompts in EVERY mode). Hard stops still
+# prompt: protected paths, secrets, code injection, pushes to protected
+# branches. Set false to prompt for everything, as before.
+# defer = false
 
 [debug]
 # Enable debug output to stderr

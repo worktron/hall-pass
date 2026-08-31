@@ -1012,3 +1012,32 @@ describe("psql SQL delivered by heredoc", () => {
     })
   })
 })
+
+describe("HALL_PASS=off stands the hook down", () => {
+  async function spawnOff(input: Record<string, unknown>) {
+    const proc = Bun.spawn(["bun", HOOK_PATH], {
+      stdin: new Response(JSON.stringify(input)),
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, HALL_PASS_CONFIG: smokeConfigPath, HALL_PASS: "off" },
+    })
+    const stdout = await new Response(proc.stdout).text()
+    await proc.exited
+    return { exitCode: proc.exitCode ?? 1, stdout }
+  }
+
+  test("a hard stop gets no decision and no audit entry", async () => {
+    const before = readSmokeAudit().length
+    const r = await spawnOff({ tool_name: "Bash", tool_input: { command: "cat ~/.ssh/id_rsa" }, tool_use_id: "toolu_off_1", session_id: "sess_off" })
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout.trim()).toBe("")
+    expect(readSmokeAudit().length).toBe(before)
+  })
+
+  test("outcome events are not recorded either", async () => {
+    const before = readSmokeAudit().length
+    const r = await spawnOff({ hook_event_name: "PostToolUse", tool_name: "Bash", tool_input: {}, tool_use_id: "toolu_off_2", session_id: "sess_off" })
+    expect(r.exitCode).toBe(0)
+    expect(readSmokeAudit().length).toBe(before)
+  })
+})

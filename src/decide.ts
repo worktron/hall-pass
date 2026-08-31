@@ -37,6 +37,35 @@ export interface DecideDeps {
   shfmtBin: string
   debug: DebugFn
   audit: AuditLogger
+  /** Claude Code's `permission_mode` for this call (auto, default, plan, acceptEdits, bypassPermissions, dontAsk). */
+  mode?: string
+}
+
+/**
+ * Permission modes in which a hook "ask" is the ONLY thing that can put a
+ * prompt in front of the user for a judgment call.
+ *
+ * A hook that returns "ask" forces a prompt in every mode — Claude Code's
+ * docs say so outright, and the audit log agrees: in auto mode an "ask" from
+ * this hook was followed by a visible prompt 76% of the time, while a "pass"
+ * (no opinion) was followed by one 2% of the time. Both ran 96% of the time.
+ * Auto mode has its own reviewer, the classifier, which reads the same
+ * command and the conversation around it; bypassPermissions is the user
+ * saying "don't ask". In these modes an "ask" for a judgment call — is this
+ * rm/sudo/ssh/inline-perl what the user meant? — adds a prompt that would
+ * not otherwise exist, and the recorded approval rate for those prompts is
+ * 96%. So here the hook steps aside on judgment calls and keeps "ask" for
+ * the hard stops only (EvalResult.hard, and the pre-parse checks below).
+ *
+ * Not listed: `default`/`acceptEdits` (Claude Code would prompt natively for
+ * the same command, so "ask" costs nothing and carries a better message),
+ * `plan` (commands may or may not reach the classifier), `dontAsk` (a
+ * "pass" there is a denial).
+ */
+export const DEFER_MODES = new Set(["auto", "bypassPermissions"])
+
+function defersToClassifier(deps: DecideDeps): boolean {
+  return deps.config.classifier.defer && DEFER_MODES.has(deps.mode ?? "")
 }
 
 /** Locate the bundled shfmt binary (dev source, compiled binary, or plugin install). */
@@ -68,6 +97,13 @@ export async function decide(
 ): Promise<HookDecision> {
   const { config, shfmtBin, debug, audit } = deps
   const command = (toolInput.command as string) ?? ""
+  const defer = defersToClassifier(deps)
+
+  /** A judgment-call prompt in a DEFER_MODES session: recorded, then handed over. */
+  const deferred = (reason: string): HookDecision => {
+    audit.log({ tool: "Bash", input: command, decision: "pass", reason: `deferred: ${reason}`, layer: "classifier" })
+    return pass(`deferred to classifier: ${reason}`)
+  }
 
   debug("input", { toolName, toolInput })
 
@@ -104,6 +140,7 @@ export async function decide(
   // -- Bash path --
   if (!command) {
     debug("bash", "empty command")
+    if (defer) return deferred("empty command")
     return prompt("empty command", "Empty command")
   }
 
@@ -118,8 +155,11 @@ export async function decide(
   const stdout = await new Response(proc.stdout).text()
   await proc.exited
 
+  // Unparseable: this hook has no opinion to offer. The classifier reads
+  // the raw text and can still judge it, so in DEFER_MODES step aside.
   if (proc.exitCode !== 0) {
     debug("shfmt", "parse failed")
+    if (defer) return deferred("shfmt failed")
     return prompt("shfmt failed", "Could not parse command")
   }
 
@@ -128,6 +168,7 @@ export async function decide(
     ast = JSON.parse(stdout)
   } catch {
     debug("shfmt", "JSON parse failed")
+    if (defer) return deferred("shfmt json failed")
     return prompt("shfmt json failed", "Could not parse command")
   }
 
@@ -176,13 +217,14 @@ export async function decide(
     }
   }
 
-  // Pipeline-level feedback rules (cross-command patterns)
-  const feedbackSuggestion = checkFeedbackRules(commandInfos)
-  if (feedbackSuggestion) {
-    debug("feedback", { suggestion: feedbackSuggestion })
-    audit.log({ tool: "Bash", input: command, decision: "feedback", reason: feedbackSuggestion, layer: "feedback" })
-    return feedback(feedbackSuggestion)
-  }
+  // Pipeline-level feedback rules (cross-command patterns). A nudge is an
+  // ALLOW with advice attached, so it can't be the verdict until every
+  // command in the pipeline has been looked at: `curl … | python3 -c …` earns
+  // a "use jq" nudge for the python3, but if the same line also does
+  // `&& rm -rf …` the rm still has to be judged.
+  let suggestion: string | null = checkFeedbackRules(commandInfos)
+  let suggestionLayer = "feedback"
+  if (suggestion) debug("feedback", { suggestion })
 
   // No commands found (e.g., bare variable assignment) — safe
   if (commandInfos.length === 0) {
@@ -194,16 +236,22 @@ export async function decide(
   const ctx = createEvalContext(config, commandInfos, shfmtBin)
 
   let hasPass = false
+  let handedOver: string | null = null   // first judgment-call prompt deferred to the classifier
   for (const cmdInfo of commandInfos) {
     const result = ctx.evaluate(cmdInfo)
     debug("eval", { name: cmdInfo.name, decision: result.decision })
 
     if (result.decision === "feedback") {
-      audit.log({ tool: "Bash", input: command, decision: "feedback", reason: result.suggestion, layer: "evaluate" })
-      return feedback(result.suggestion)
+      if (!suggestion) { suggestion = result.suggestion; suggestionLayer = "evaluate" }
+      continue
     }
 
     if (result.decision === "prompt") {
+      if (defer && !result.hard) {
+        debug("defer", { name: cmdInfo.name, reason: result.reason })
+        handedOver ??= result.reason
+        continue   // a later command may still be a hard stop
+      }
       audit.log({ tool: "Bash", input: command, decision: "prompt", reason: result.reason, layer: "evaluate" })
       return prompt(result.reason, result.message)
     }
@@ -211,6 +259,16 @@ export async function decide(
     if (result.decision === "pass") {
       hasPass = true
     }
+  }
+
+  // Precedence once every command has been seen: a deferred judgment call
+  // outranks a nudge (the nudge would be an allow, and the classifier has
+  // to see the command); a nudge outranks an unknown command, as before.
+  if (handedOver) return deferred(handedOver)
+
+  if (suggestion) {
+    audit.log({ tool: "Bash", input: command, decision: "feedback", reason: suggestion, layer: suggestionLayer })
+    return feedback(suggestion)
   }
 
   // If any command was unknown (pass), step aside — let Claude Code decide
