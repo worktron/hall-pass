@@ -4,8 +4,9 @@
  * hall-pass uninstall
  *
  * Removes all hall-pass hooks from the host's hook settings:
- *   default  ~/.claude/settings.json (PreToolUse, PostToolUse, Notification)
- *   --codex  ~/.codex/hooks.json     (PreToolUse, PermissionRequest, PostToolUse)
+ *   default  $CLAUDE_CONFIG_DIR/settings.json, or ~/.claude/settings.json
+ *            (PreToolUse, PostToolUse, Notification)
+ *   --codex  ~/.codex/hooks.json (PreToolUse, PermissionRequest, PostToolUse)
  * Does not remove non-Bash tool permissions (you probably still want those).
  */
 
@@ -14,9 +15,11 @@ import { homedir } from "os"
 
 const CODEX = process.argv.includes("--codex")
 const HOST = CODEX ? "Codex" : "Claude Code"
+// Same resolution as install.ts: the config directory the account was launched with.
+const CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || resolve(homedir(), ".claude")
 const SETTINGS_PATH = CODEX
   ? resolve(homedir(), ".codex", "hooks.json")
-  : resolve(homedir(), ".claude", "settings.json")
+  : resolve(CLAUDE_CONFIG_DIR, "settings.json")
 
 const settingsFile = Bun.file(SETTINGS_PATH)
 
