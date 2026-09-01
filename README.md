@@ -1,6 +1,6 @@
 # hall-pass
 
-A [PreToolUse hook](https://code.claude.com/docs/en/hooks-guide) for [Claude Code](https://claude.com/claude-code) that auto-approves safe commands, blocks dangerous ones, and protects sensitive files.
+A [PreToolUse hook](https://code.claude.com/docs/en/hooks-guide) for [Claude Code](https://claude.com/claude-code) that auto-approves safe commands, blocks dangerous ones, and protects sensitive files. It also runs under [Codex](https://developers.openai.com/codex) — see [Codex](#codex).
 
 ## The problem
 
@@ -102,6 +102,18 @@ Deferred decisions are recorded in the audit log as `pass` with reason `deferred
 
 To take hall-pass out of a single session entirely — every decision left to Claude Code, no audit entries — start that session with `HALL_PASS=off` in its environment. The hook stays installed for everything else. This is the switch for a launcher that runs many hands-off sessions and wants Claude Code's own review alone.
 
+## Codex
+
+Codex's hook protocol is a clone of Claude Code's (same stdin fields, same `hookSpecificOutput` shape), so the whole decision pipeline runs unchanged. What differs is what a hook may say back, and hall-pass adapts at the edge (`src/codex.ts`):
+
+- **Codex has no hook "ask".** `permissionDecision: "ask"` is parsed but unsupported: Codex marks the hook failed and runs the tool anyway. So under Codex, **hard stops are denied** — protected paths, hardcoded secrets, code injection (`curl | bash`, `LD_PRELOAD`), exfiltration domains, pushes to protected branches. Set `codex.deny_hard_stops = false` to downgrade them to a warning and let Codex's sandbox and approval prompt decide.
+- **Judgment calls are never denied.** `rm`, `sudo`, `ssh`, inline `perl`, an unknown command: hall-pass shows its reason as a warning and leaves the prompt to Codex.
+- **Skipping the prompt happens on `PermissionRequest`.** That event fires only when Codex is about to ask you (a sandbox escalation, network access). hall-pass answers "allow" for commands it judges safe, "deny" for hard stops, and stays silent otherwise so the native prompt stands.
+- **File edits arrive as `apply_patch`.** There is no Write or Edit tool; hall-pass parses the patch (`src/patch.ts`) and applies the same path protection and secret scan to every file in it — including `apply_patch <<'EOF'` sent through the shell.
+- **Outcome monitoring works the same.** Audit entries carry `host: "codex"`; a `PermissionRequest` hall-pass leaves alone is recorded as a native prompt.
+
+Codex skips a new or changed hook until you trust it: after installing, open a Codex session and run `/hooks`.
+
 ## Setup
 
 ### Prerequisites
@@ -126,10 +138,19 @@ bun run setup
 
 This downloads [shfmt](https://github.com/mvdan/sh) (used to parse Bash commands), registers hooks for Bash, Write, and Edit tools in `~/.claude/settings.json`, and sets up non-Bash tool permissions (Read, Glob, Grep, WebFetch, WebSearch).
 
+### Install for Codex
+
+```bash
+bun run setup:codex        # or: hall-pass-install --codex
+```
+
+Registers `PreToolUse`, `PermissionRequest`, and `PostToolUse` hooks for `Bash` and `apply_patch` in `~/.codex/hooks.json`. Both installs can coexist; they share the config file and the audit log. Then run `/hooks` inside Codex to trust the new hook definition.
+
 ### Uninstall
 
 ```bash
-bun run uninstall
+bun run uninstall            # Claude Code
+bun run uninstall:codex      # Codex
 ```
 
 ### Verify
@@ -182,6 +203,12 @@ path = "~/.config/hall-pass/audit.jsonl"
 # In auto mode (and bypassPermissions), hand judgment calls to Claude Code's
 # classifier instead of forcing a prompt. Hard stops always prompt. Default true.
 defer = true
+
+[codex]
+# Codex hooks cannot "ask", so hard stops are denied there. Set false to
+# downgrade them to a warning and let Codex's sandbox and prompt decide.
+# Judgment calls are never denied. Default true.
+deny_hard_stops = true
 
 [debug]
 # Enable debug output to stderr
@@ -262,9 +289,13 @@ Input from Claude Code: { tool_name, tool_input }
 
 ```
 src/
-  hook.ts        Entry point — reads stdin, routes by tool, checks all layers
+  hook.ts        Claude Code entry point — reads stdin, emits the decision
+  codex-hook.ts  Codex entry point — same pipeline, Codex's output protocol
+  codex.ts       Decision → Codex output mapping (deny hard stops, no "ask")
   decide.ts      The decision: pre-parse hard stops, per-command evaluation,
                  auto-mode deferral (DEFER_MODES)
+  patch.ts       apply_patch parser + path/secret checks over each file
+  diag.ts        Diagnostic log shared by the entry points
   parser.ts      AST walker — extracts command names from shfmt JSON
   safelist.ts    Safe commands, inspected commands, DB clients
   git.ts         Git subcommand + flag safety checker
@@ -274,8 +305,8 @@ src/
   debug.ts       Debug logging to stderr
   audit.ts       Audit logging to JSON Lines file
   cli.ts         CLI for hall-pass-init
-  install.ts     Registers hooks in ~/.claude/settings.json
-  uninstall.ts   Removes hooks
+  install.ts     Registers hooks in ~/.claude/settings.json (--codex: ~/.codex/hooks.json)
+  uninstall.ts   Removes hooks (--codex for Codex)
   *.test.ts      Tests
 ```
 

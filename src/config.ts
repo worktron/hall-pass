@@ -24,6 +24,14 @@ export interface HallPassConfig {
    * pushes to protected branches) prompt regardless. See decide.ts.
    */
   classifier: { defer: boolean };
+  /**
+   * deny_hard_stops: Codex has no hook "ask" (it is parsed but unsupported,
+   * and the tool runs anyway). Hard stops — protected paths, secrets, code
+   * injection, exfiltration, pushes to protected branches — become a DENY
+   * under Codex when this is true. When false they become a warning and
+   * Codex's own sandbox and approval flow decide. See codex.ts.
+   */
+  codex: { deny_hard_stops: boolean };
 }
 
 /** Default protected path patterns — always active even without config. */
@@ -56,6 +64,7 @@ const DEFAULT_CONFIG: HallPassConfig = {
   },
   debug: { enabled: false },
   classifier: { defer: true },
+  codex: { deny_hard_stops: true },
 };
 
 /** Expand ~ to the user's home directory in a path string. */
@@ -95,6 +104,7 @@ function mergeConfig(
   const audit = user.audit as Partial<Record<string, unknown>> | undefined;
   const debug = user.debug as Partial<Record<string, unknown>> | undefined;
   const classifier = user.classifier as Partial<Record<string, unknown>> | undefined;
+  const codex = user.codex as Partial<Record<string, unknown>> | undefined;
 
   return {
     commands: {
@@ -132,6 +142,9 @@ function mergeConfig(
     },
     classifier: {
       defer: (classifier?.defer as boolean) ?? defaults.classifier.defer,
+    },
+    codex: {
+      deny_hard_stops: (codex?.deny_hard_stops as boolean) ?? defaults.codex.deny_hard_stops,
     },
   };
 }
@@ -248,6 +261,15 @@ export function generateDefaultConfig(): string {
 # prompt: protected paths, secrets, code injection, pushes to protected
 # branches. Set false to prompt for everything, as before.
 # defer = false
+
+[codex]
+# Codex hooks cannot "ask" — a hook can only allow, deny, or step aside.
+# Hard stops (protected paths, secrets, code injection, exfiltration domains,
+# pushes to protected branches) are therefore DENIED under Codex. Set false
+# to downgrade them to a warning and let Codex's sandbox and approval prompt
+# decide. Judgment calls (rm, sudo, ssh, ...) are never denied: hall-pass
+# shows its reason and leaves the prompt to Codex.
+# deny_hard_stops = false
 
 [debug]
 # Enable debug output to stderr

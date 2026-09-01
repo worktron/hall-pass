@@ -12,6 +12,7 @@ import type { EvalResult, EvalContext } from "./evaluate.ts"
 import { checkGitCommand } from "./git.ts"
 import { DANGEROUS_ENV_VARS } from "./safelist.ts"
 import { checkFilePath } from "./paths.ts"
+import { parseApplyPatch, checkPatch } from "./patch.ts"
 
 export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 
@@ -53,6 +54,22 @@ export const INSPECTORS: Record<string, Inspector> = {
   source: () => {
     // source/. executes arbitrary scripts — always prompt
     return prompt("source: executes arbitrary scripts", `"source" executes an external script`)
+  },
+
+  // Codex's file-edit primitive, reached through the shell as
+  // `apply_patch <<'EOF' … EOF`. The patch is the heredoc; judge it with the
+  // same path-protection and secret scan the apply_patch tool gets (patch.ts).
+  apply_patch: (cmdInfo, ctx) => {
+    if (cmdInfo.stdin === undefined) {
+      return prompt("apply_patch: patch not visible", `"apply_patch" reads a patch that is not in the command`)
+    }
+    const files = parseApplyPatch(cmdInfo.stdin)
+    if (files === null) {
+      return prompt("apply_patch: no patch in heredoc", `"apply_patch" heredoc has no *** Begin Patch marker`)
+    }
+    const check = checkPatch(files, ctx.config)
+    if (!check.ok) return { decision: "prompt", reason: `apply_patch ${check.reason}`, message: check.message, hard: true }
+    return allow(`apply_patch: ${files.length} file(s) allowed`)
   },
 
   eval: (cmdInfo, ctx) => {

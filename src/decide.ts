@@ -20,16 +20,24 @@ import { checkFeedbackRules } from "./feedback.ts"
 import { createEvalContext } from "./evaluate.ts"
 import { detectSecret } from "./secrets.ts"
 import { detectExfilDomain } from "./network.ts"
+import { parseApplyPatch, checkPatch } from "./patch.ts"
 
 export type HookDecision =
   | { decision: "allow"; reason: string }
   | { decision: "feedback"; suggestion: string }
-  | { decision: "ask"; reason: string; message: string }
+  /**
+   * `hard` marks an ask that is not a judgment call: protected paths,
+   * secrets, code injection, exfiltration, pushes to protected branches.
+   * Claude Code prompts for these in every mode. Hosts without an "ask"
+   * (Codex, see codex.ts) turn them into a deny.
+   */
+  | { decision: "ask"; reason: string; message: string; hard?: boolean }
   | { decision: "pass"; reason: string }
 
 const allow = (reason: string): HookDecision => ({ decision: "allow", reason })
 const feedback = (suggestion: string): HookDecision => ({ decision: "feedback", suggestion })
 const prompt = (reason: string, message: string): HookDecision => ({ decision: "ask", reason, message })
+const hardStop = (reason: string, message: string): HookDecision => ({ decision: "ask", reason, message, hard: true })
 const pass = (reason: string): HookDecision => ({ decision: "pass", reason })
 
 export interface DecideDeps {
@@ -121,7 +129,7 @@ export async function decide(
 
     if (!decision.allowed) {
       audit.log({ tool: toolName, input: filePath, decision: "prompt", reason: decision.reason, layer: "paths" })
-      return prompt(`path-blocked: ${decision.reason}`, `File path ${decision.reason}`)
+      return hardStop(`path-blocked: ${decision.reason}`, `File path ${decision.reason}`)
     }
 
     const content = (toolInput.content ?? toolInput.new_string ?? "") as string
@@ -129,12 +137,34 @@ export async function decide(
       const secret = detectSecret(content)
       if (secret) {
         audit.log({ tool: toolName, input: filePath, decision: "prompt", reason: `secret: ${secret.type}`, layer: "secrets" })
-        return prompt(`secret in ${toolName.toLowerCase()}: ${secret.type}`, `${toolName} contains a hardcoded ${secret.type} (${secret.preview})`)
+        return hardStop(`secret in ${toolName.toLowerCase()}: ${secret.type}`, `${toolName} contains a hardcoded ${secret.type} (${secret.preview})`)
       }
     }
 
     audit.log({ tool: toolName, input: filePath, decision: "allow", reason: "no path match", layer: "paths" })
     return allow("write/edit allowed")
+  }
+
+  // -- apply_patch path (Codex): the same checks, over every file in the patch --
+  if (toolName === "apply_patch") {
+    const files = parseApplyPatch(command)
+    if (files === null) {
+      debug("apply_patch", "no *** Begin Patch marker")
+      audit.log({ tool: toolName, input: command.slice(0, 200), decision: "pass", reason: "unparseable patch", layer: "paths" })
+      return pass("apply_patch: no patch found in input")
+    }
+    const paths = files.map((f) => (f.movedTo ? `${f.path} -> ${f.movedTo}` : f.path)).join(", ")
+    debug("apply_patch", { files: paths })
+
+    const check = checkPatch(files, config)
+    if (!check.ok) {
+      const layer = check.reason.startsWith("secret") ? "secrets" : "paths"
+      audit.log({ tool: toolName, input: paths, decision: "prompt", reason: check.reason, layer })
+      return hardStop(check.reason, check.message)
+    }
+
+    audit.log({ tool: toolName, input: paths, decision: "allow", reason: "no path match", layer: "paths" })
+    return allow(`apply_patch: ${files.length} file(s) allowed`)
   }
 
   // -- Bash path --
@@ -178,14 +208,14 @@ export async function decide(
   if (secret) {
     debug("secret", secret)
     audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `secret: ${secret.type}`, layer: "secrets" })
-    return prompt(`secret: ${secret.type}`, `Command contains a hardcoded ${secret.type} (${secret.preview})`)
+    return hardStop(`secret: ${secret.type}`, `Command contains a hardcoded ${secret.type} (${secret.preview})`)
   }
 
   const exfilDomain = detectExfilDomain(command)
   if (exfilDomain) {
     debug("exfil", { domain: exfilDomain })
     audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `exfil: ${exfilDomain}`, layer: "network" })
-    return prompt(`exfil: ${exfilDomain}`, `Command targets known data-exfiltration service "${exfilDomain}"`)
+    return hardStop(`exfil: ${exfilDomain}`, `Command targets known data-exfiltration service "${exfilDomain}"`)
   }
 
   // -- Extract commands and AST-level data --
@@ -199,7 +229,7 @@ export async function decide(
     if (PIPE_SHELLS.has(name)) {
       debug("pipe-target", { name })
       audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `pipe to ${name}`, layer: "pipe-target" })
-      return prompt(`pipe to ${name}`, `Piping into "${name}" executes arbitrary piped content as code`)
+      return hardStop(`pipe to ${name}`, `Piping into "${name}" executes arbitrary piped content as code`)
     }
   }
 
@@ -213,7 +243,7 @@ export async function decide(
     if (!decision.allowed) {
       debug("redirect-block", { path: redir.path, op, reason: decision.reason })
       audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `redirect ${decision.reason}`, layer: "paths" })
-      return prompt(`redirect-blocked: ${decision.reason}`, `Redirect targets ${decision.reason}`)
+      return hardStop(`redirect-blocked: ${decision.reason}`, `Redirect targets ${decision.reason}`)
     }
   }
 
@@ -253,7 +283,7 @@ export async function decide(
         continue   // a later command may still be a hard stop
       }
       audit.log({ tool: "Bash", input: command, decision: "prompt", reason: result.reason, layer: "evaluate" })
-      return prompt(result.reason, result.message)
+      return result.hard ? hardStop(result.reason, result.message) : prompt(result.reason, result.message)
     }
 
     if (result.decision === "pass") {
