@@ -138,6 +138,8 @@ bun run setup
 
 This downloads [shfmt](https://github.com/mvdan/sh) (used to parse Bash commands), registers hooks for Bash, Write, and Edit tools in `~/.claude/settings.json`, and sets up non-Bash tool permissions (Read, Glob, Grep, WebFetch, WebSearch).
 
+If you run more than one Claude account via `CLAUDE_CONFIG_DIR`, the hooks are registered in that directory's `settings.json` instead. Run setup once per account, from a session of that account. hall-pass's own config and audit log live in `~/.config/hall-pass/` and are shared by every account.
+
 ### Install for Codex
 
 ```bash

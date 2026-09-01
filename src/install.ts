@@ -3,7 +3,8 @@
 /**
  * hall-pass install
  *
- * Default (Claude Code) — sets up the hooks in ~/.claude/settings.json:
+ * Default (Claude Code) — sets up the hooks in the account's settings.json
+ * ($CLAUDE_CONFIG_DIR/settings.json, or ~/.claude/settings.json):
  * 1. Checks that shfmt is installed
  * 2. Adds PreToolUse (decisions) + PostToolUse (outcome monitoring) hooks for
  *    Bash, Write, and Edit, and a Notification hook for permission_prompt
@@ -24,10 +25,18 @@ import { homedir } from "os"
 
 const CODEX = process.argv.includes("--codex")
 
+/**
+ * Claude Code reads settings from the config directory it was launched
+ * with: $CLAUDE_CONFIG_DIR when set (one directory per account), else
+ * ~/.claude. Register where the running account will look, or the hooks
+ * land in a file its sessions never read.
+ */
+const CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || resolve(homedir(), ".claude")
+
 const HOOK_PATH = resolve(import.meta.dir, CODEX ? "codex-hook.ts" : "hook.ts")
 const SETTINGS_PATH = CODEX
   ? resolve(homedir(), ".codex", "hooks.json")
-  : resolve(homedir(), ".claude", "settings.json")
+  : resolve(CLAUDE_CONFIG_DIR, "settings.json")
 const HOOK_COMMAND = `bun ${HOOK_PATH}`
 
 const NON_BASH_TOOLS = ["Read", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"]
