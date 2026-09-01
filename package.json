@@ -1,7 +1,7 @@
 {
   "name": "hall-pass",
   "version": "0.2.0",
-  "description": "PreToolUse hook for Claude Code — auto-approves safe commands, blocks dangerous ones, protects sensitive files",
+  "description": "PreToolUse hook for Claude Code and Codex — auto-approves safe commands, blocks dangerous ones, protects sensitive files",
   "module": "src/hook.ts",
   "type": "module",
   "private": false,
@@ -17,11 +17,13 @@
   ],
   "scripts": {
     "setup": "bun src/install.ts",
+    "setup:codex": "bun src/install.ts --codex",
     "uninstall": "bun src/uninstall.ts",
+    "uninstall:codex": "bun src/uninstall.ts --codex",
     "test": "bun test",
     "stats": "bun src/stats.ts",
     "eval": "bun src/eval.ts",
-    "typecheck": "bun build src/hook.ts --no-bundle --no-emit"
+    "typecheck": "bun build src/hook.ts --no-bundle --no-emit && bun build src/codex-hook.ts --no-bundle --no-emit"
   },
   "repository": {
     "type": "git",
@@ -35,7 +37,8 @@
     "pretooluse",
     "guardrails",
     "ai-safety",
-    "command-approval"
+    "command-approval",
+    "codex"
   ],
   "engines": {
     "bun": ">=1.0.0"

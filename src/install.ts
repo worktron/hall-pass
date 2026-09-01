@@ -3,23 +3,37 @@
 /**
  * hall-pass install
  *
- * Sets up the hall-pass hooks in Claude Code's settings:
+ * Default (Claude Code) — sets up the hooks in ~/.claude/settings.json:
  * 1. Checks that shfmt is installed
  * 2. Adds PreToolUse (decisions) + PostToolUse (outcome monitoring) hooks for
  *    Bash, Write, and Edit, and a Notification hook for permission_prompt
  *    (records when a native permission prompt is shown)
  * 3. Adds non-Bash tool permissions (Read, Edit, Glob, Grep, WebFetch, WebSearch)
+ *
+ * --codex — sets up the Codex hooks in ~/.codex/hooks.json instead:
+ *    PreToolUse, PermissionRequest and PostToolUse for Bash and apply_patch,
+ *    pointing at src/codex-hook.ts (see codex.ts for why the entry differs).
+ *    Codex asks you to review and trust a new hook definition on first use:
+ *    run `/hooks` inside Codex after installing.
+ *
+ * --init — also writes a default ~/.config/hall-pass/config.toml.
  */
 
 import { resolve } from "path"
 import { homedir } from "os"
 
-const HOOK_PATH = resolve(import.meta.dir, "hook.ts")
-const SETTINGS_PATH = resolve(homedir(), ".claude", "settings.json")
+const CODEX = process.argv.includes("--codex")
+
+const HOOK_PATH = resolve(import.meta.dir, CODEX ? "codex-hook.ts" : "hook.ts")
+const SETTINGS_PATH = CODEX
+  ? resolve(homedir(), ".codex", "hooks.json")
+  : resolve(homedir(), ".claude", "settings.json")
 const HOOK_COMMAND = `bun ${HOOK_PATH}`
 
 const NON_BASH_TOOLS = ["Read", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"]
 const HOOK_MATCHERS = ["Bash", "Write", "Edit"]
+/** One matcher group covers both Codex tools hall-pass judges (matcher is a regex). */
+const CODEX_MATCHER = "Bash|apply_patch"
 
 // -- Check / install shfmt --
 
@@ -57,7 +71,7 @@ if (shfmt.exitCode !== 0) {
   console.log("shfmt found:", shfmt.stdout.toString().trim())
 }
 
-// -- Read or create settings.json --
+// -- Read or create the settings file --
 
 let settings: Record<string, unknown> = {}
 const settingsFile = Bun.file(SETTINGS_PATH)
@@ -71,25 +85,26 @@ if (await settingsFile.exists()) {
     process.exit(1)
   }
 } else {
-  // Ensure ~/.claude/ directory exists
-  const dir = resolve(homedir(), ".claude")
-  await Bun.spawn(["mkdir", "-p", dir]).exited
+  await Bun.spawn(["mkdir", "-p", resolve(SETTINGS_PATH, "..")]).exited
   console.log("Creating new settings:", SETTINGS_PATH)
 }
 
-// -- Add non-Bash tool permissions --
+// -- Add non-Bash tool permissions (Claude Code only) --
 
-const permissions = (settings.permissions ?? {}) as Record<string, unknown>
-const allow = new Set(permissions.allow as string[] ?? [])
+if (!CODEX) {
+  const permissions = (settings.permissions ?? {}) as Record<string, unknown>
+  const allow = new Set(permissions.allow as string[] ?? [])
 
-for (const tool of NON_BASH_TOOLS) {
-  allow.add(tool)
+  for (const tool of NON_BASH_TOOLS) {
+    allow.add(tool)
+  }
+
+  permissions.allow = [...allow]
+  settings.permissions = permissions
 }
 
-permissions.allow = [...allow]
-settings.permissions = permissions
-
 // -- Add hook registrations --
+// Both hosts use the same three-level shape: event → matcher group → handlers.
 
 const hooks = (settings.hooks ?? {}) as Record<string, unknown[]>
 
@@ -113,21 +128,26 @@ function registerHook(eventName: string, matcher: string) {
     if (hookEntry) hookEntry.command = HOOK_COMMAND
     console.log(`Updated existing hall-pass ${eventName} hook for ${matcher}`)
   } else {
-    entries.push({
-      matcher,
-      hooks: [{ type: "command", command: HOOK_COMMAND }],
-    })
+    const handler: Record<string, unknown> = { type: "command", command: HOOK_COMMAND }
+    if (CODEX) handler.statusMessage = "hall-pass"
+    entries.push({ matcher, hooks: [handler] })
     console.log(`Added hall-pass ${eventName} hook for ${matcher}`)
   }
 
   hooks[eventName] = entries
 }
 
-for (const matcher of HOOK_MATCHERS) {
-  registerHook("PreToolUse", matcher)
-  registerHook("PostToolUse", matcher)
+if (CODEX) {
+  registerHook("PreToolUse", CODEX_MATCHER)
+  registerHook("PermissionRequest", CODEX_MATCHER)
+  registerHook("PostToolUse", CODEX_MATCHER)
+} else {
+  for (const matcher of HOOK_MATCHERS) {
+    registerHook("PreToolUse", matcher)
+    registerHook("PostToolUse", matcher)
+  }
+  registerHook("Notification", "permission_prompt")
 }
-registerHook("Notification", "permission_prompt")
 
 settings.hooks = hooks
 
@@ -143,4 +163,9 @@ if (process.argv.includes("--init")) {
 
 await Bun.write(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n")
 console.log("Wrote settings to", SETTINGS_PATH)
-console.log("\nDone. Restart Claude Code sessions to pick up the new settings.")
+if (CODEX) {
+  console.log("\nDone. Codex skips a new or changed hook until you trust it:")
+  console.log("open a Codex session and run /hooks to review and trust the hall-pass hooks.")
+} else {
+  console.log("\nDone. Restart Claude Code sessions to pick up the new settings.")
+}

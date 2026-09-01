@@ -27,6 +27,8 @@ export interface AuditContext {
   session?: string
   tool_use_id?: string
   mode?: string
+  /** Which agent the hook ran under. Absent means Claude Code (entries predate the field). */
+  host?: "codex"
 }
 
 export interface AuditEntry extends AuditContext {

@@ -3,15 +3,20 @@
 /**
  * hall-pass uninstall
  *
- * Removes all hall-pass hooks (PreToolUse, PostToolUse, Notification)
- * from Claude Code's settings.
+ * Removes all hall-pass hooks from the host's hook settings:
+ *   default  ~/.claude/settings.json (PreToolUse, PostToolUse, Notification)
+ *   --codex  ~/.codex/hooks.json     (PreToolUse, PermissionRequest, PostToolUse)
  * Does not remove non-Bash tool permissions (you probably still want those).
  */
 
 import { resolve } from "path"
 import { homedir } from "os"
 
-const SETTINGS_PATH = resolve(homedir(), ".claude", "settings.json")
+const CODEX = process.argv.includes("--codex")
+const HOST = CODEX ? "Codex" : "Claude Code"
+const SETTINGS_PATH = CODEX
+  ? resolve(homedir(), ".codex", "hooks.json")
+  : resolve(homedir(), ".claude", "settings.json")
 
 const settingsFile = Bun.file(SETTINGS_PATH)
 
@@ -58,4 +63,4 @@ if (Object.keys(hooks).length === 0) delete settings.hooks
 
 await Bun.write(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n")
 console.log("Removed hall-pass hook from", SETTINGS_PATH)
-console.log("Restart Claude Code sessions to pick up the change.")
+console.log(`Restart ${HOST} sessions to pick up the change.`)
