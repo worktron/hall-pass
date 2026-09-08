@@ -37,6 +37,10 @@ Git commands get deeper inspection of subcommands and flags. Safe operations are
 | `git checkout <branch>`, `switch` | `git branch -D` |
 | `git merge`, `cherry-pick`, `revert` | `git push origin main` (protected branches) |
 
+A push to a protected branch name (`main`, `staging`, …) is judged by where it goes. A remote whose URL is a local path, or a repository under a temp or scratchpad directory, is a throwaway and the push passes; a GitHub (or any network) remote keeps the stop. `-C` and `HEAD:main` forms are read the same way, and a push hall-pass cannot place (no cwd, `git -C $DIR`) keeps the stop.
+
+`core.hooksPath` is the one executable config key with an allowance: the repository's own hook directory. `git -c core.hooksPath=scripts/git-hooks commit` and `git config core.hooksPath scripts/git-hooks` pass when the value is a relative path inside the repository that exists and is either `scripts/git-hooks` or the directory the repository's `metamax.json` `worktreeSetup` sets. An absolute path, a path that escapes the repository, a directory that does not exist, or a `--global` write still stops.
+
 A variable in the command line keeps its place: `git -C $DIR reset --hard` is read as a `reset --hard`, not as bare `git`. (Expansions render as `$NAME` / `$(...)` placeholders in the parsed arguments, which can never match a protected path or branch name.)
 
 ### Layer 3: SQL safety
@@ -93,8 +97,8 @@ So hall-pass is mode-aware. In `auto` mode (and `bypassPermissions`, which is th
 - a known data-exfiltration domain
 - piping downloaded content into a shell (`curl … | bash`)
 - code-injecting environment variables (`LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, `BASH_ENV`, …)
-- git config keys that execute commands (`core.hooksPath`, …)
-- `git push` to a protected branch (`main`, `staging`, …) — the classifier approves pushes to any branch of the working repo, and a human checkpoint before those branches is the whole point of listing them
+- git config keys that execute commands (`core.hooksPath`, …), except `core.hooksPath` set to the repository's own hook directory (see Layer 2)
+- `git push` to a protected branch (`main`, `staging`, …) of a network remote — the classifier approves pushes to any branch of the working repo, and a human checkpoint before those branches is the whole point of listing them. A local-path remote or a throwaway repository under a temp directory is not protected (see Layer 2)
 
 In `default` (Manual) and `acceptEdits` mode nothing changes: Claude Code would prompt natively for the same command, so hall-pass's `ask` costs nothing and carries a better message. `allow` decisions are unchanged in every mode — a safelisted command never waits on the classifier.
 

@@ -1041,3 +1041,99 @@ describe("HALL_PASS=off stands the hook down", () => {
     expect(readSmokeAudit().length).toBe(before)
   })
 })
+
+// -- Repository-aware git rules, end to end through decide() with a cwd --
+//
+// The hook passes Claude Code's `cwd` into decide(); these are the four
+// commands the harness-spine ticket T11 names, judged the way the installed
+// hook judges them. Repositories are real (git init) so the rules can read
+// the top level, the remotes, and metamax.json.
+
+describe("repository-aware git rules (cwd)", () => {
+  const { mkdirSync, rmSync } = require("fs") as typeof import("fs")
+  function sh(cwd: string, ...args: string[]): void {
+    const r = Bun.spawnSync(args, { cwd, stdout: "ignore", stderr: "pipe" })
+    if (r.exitCode !== 0) throw new Error(`${args.join(" ")} failed: ${r.stderr.toString()}`)
+  }
+  // node_modules/.cache is not a temp directory, so a GitHub origin there is protected.
+  const home = resolve(import.meta.dir, "..", "node_modules", ".cache", `hall-pass-hook-${process.pid}`)
+  const bare = resolve(home, "bare.git")
+  const metamaxLike = resolve(home, "metamax")   // a metamax worktree: scripts/git-hooks + metamax.json, GitHub origin
+  const localOrigin = resolve(home, "local")     // origin is the bare directory
+  mkdirSync(bare, { recursive: true })
+  sh(bare, "git", "init", "-q", "--bare")
+  mkdirSync(resolve(metamaxLike, "scripts", "git-hooks"), { recursive: true })
+  sh(metamaxLike, "git", "init", "-q")
+  sh(metamaxLike, "git", "remote", "add", "origin", "git@github.com-worktron:worktron/metamax.git")
+  writeFileSync(resolve(metamaxLike, "metamax.json"), JSON.stringify({ worktreeSetup: ["git config core.hooksPath scripts/git-hooks"] }))
+  mkdirSync(localOrigin, { recursive: true })
+  sh(localOrigin, "git", "init", "-q")
+  sh(localOrigin, "git", "remote", "add", "origin", bare)
+
+  async function judge(command: string, cwd: string, mode?: string): Promise<HookDecision> {
+    return decide("Bash", { command }, { config: await getConfig(), shfmtBin, debug: noopDebug, audit: noopAudit, mode, cwd })
+  }
+
+  test("git -c core.hooksPath=scripts/git-hooks commit passes the safelist in a metamax worktree", async () => {
+    const d = await judge("git -c core.hooksPath=scripts/git-hooks commit -m 'T11'", metamaxLike)
+    expect(d.decision).toBe("allow")
+  })
+
+  test("git config core.hooksPath scripts/git-hooks passes in a metamax worktree", async () => {
+    expect((await judge("git config core.hooksPath scripts/git-hooks", metamaxLike)).decision).toBe("allow")
+  })
+
+  test("git config core.hooksPath /tmp/x still stops, in every mode", async () => {
+    for (const mode of [undefined, "default", "auto", "bypassPermissions"]) {
+      const d = await judge("git config core.hooksPath /tmp/x", metamaxLike, mode)
+      expect(d.decision).toBe("ask")
+      if (d.decision === "ask") {
+        expect(d.hard).toBe(true)
+        expect(d.reason).toBe("git: dangerous config write core.hookspath")
+      }
+    }
+  })
+
+  test("git -c core.hooksPath=scripts/git-hooks stops where the directory does not exist", async () => {
+    expect((await judge("git -c core.hooksPath=scripts/git-hooks commit -m x", localOrigin)).decision).toBe("ask")
+  })
+
+  test("git push origin main passes when origin is a local path", async () => {
+    expect(await judge("git push origin main", localOrigin)).toEqual({ decision: "allow", reason: "all commands safe" })
+    expect((await judge("git push origin HEAD:main", localOrigin)).decision).toBe("allow")
+    expect((await judge(`git -C ${localOrigin} push origin HEAD:main`, metamaxLike)).decision).toBe("allow")
+  })
+
+  test("git push origin main still stops when origin is GitHub, in every mode", async () => {
+    for (const mode of [undefined, "default", "auto", "bypassPermissions"]) {
+      const d = await judge("git push origin main", metamaxLike, mode)
+      expect(d.decision).toBe("ask")
+      if (d.decision === "ask") {
+        expect(d.hard).toBe(true)
+        expect(d.reason).toBe("git: push to protected branch main")
+      }
+    }
+    expect((await judge("git push origin HEAD:main", metamaxLike)).decision).toBe("ask")
+    expect((await judge(`git -C ${metamaxLike} push origin HEAD:main`, localOrigin)).decision).toBe("ask")
+  })
+
+  test("a repository under a scratchpad directory is a throwaway, even with a GitHub origin", async () => {
+    const scratchpad = resolve(mkdtempSync(resolve(tmpdir(), "hall-pass-t11-")), "scratchpad", "repo")
+    mkdirSync(scratchpad, { recursive: true })
+    sh(scratchpad, "git", "init", "-q")
+    sh(scratchpad, "git", "remote", "add", "origin", "git@github.com:worktron/example.git")
+    expect((await judge("git push origin main", scratchpad)).decision).toBe("allow")
+    rmSync(resolve(scratchpad, "..", ".."), { recursive: true, force: true })
+  })
+
+  test("without a cwd both rules keep the stop", async () => {
+    const config = await getConfig()
+    const bare = (command: string) => decide("Bash", { command }, { config, shfmtBin, debug: noopDebug, audit: noopAudit })
+    expect((await bare("git push origin main")).decision).toBe("ask")
+    expect((await bare("git -c core.hooksPath=scripts/git-hooks commit -m x")).decision).toBe("ask")
+  })
+
+  test("cleanup", () => {
+    rmSync(home, { recursive: true, force: true })
+  })
+})

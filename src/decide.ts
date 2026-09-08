@@ -47,6 +47,8 @@ export interface DecideDeps {
   audit: AuditLogger
   /** Claude Code's `permission_mode` for this call (auto, default, plan, acceptEdits, bypassPermissions, dontAsk). */
   mode?: string
+  /** The hook input's `cwd`: where the command runs. Git rules that look at the repository need it. */
+  cwd?: string
 }
 
 /**
@@ -263,7 +265,7 @@ export async function decide(
   }
 
   // -- Per-command evaluation --
-  const ctx = createEvalContext(config, commandInfos, shfmtBin)
+  const ctx = createEvalContext(config, commandInfos, shfmtBin, deps.cwd)
 
   let hasPass = false
   let handedOver: string | null = null   // first judgment-call prompt deferred to the classifier

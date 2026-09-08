@@ -6,12 +6,41 @@
  * Destructive operations that can lose work are flagged.
  *
  * Returns a GitDecision — safe: true or safe: false with reason + human message.
+ *
+ * Two rules look past the command line at the repository it runs in (see
+ * repo.ts): setting `core.hooksPath` is allowed when the value is the repo's
+ * own hook directory, and a push to a protected branch name is allowed when
+ * the remote is a local path or the repository is a throwaway under a temp
+ * directory. Both need to know where the command runs: the hook's cwd,
+ * adjusted by any `-C`. Without that (no cwd, a `$VAR` in `-C`) the
+ * conservative rule stands.
  */
+
+import { resolve, isAbsolute, posix } from "path"
+import { statSync } from "fs"
+import { gitTopLevel, gitRemoteUrl, isLocalRemoteUrl, isScratchDir, readWorktreeSetup } from "./repo.ts"
 
 export type GitDecision =
   | { safe: true }
   /** `hard`: prompts in every permission mode (see EvalResult in evaluate.ts). */
   | { safe: false; reason: string; message: string; hard?: boolean }
+
+/** Where the git command runs. `cwd` is the hook's working directory. */
+export interface GitRepo {
+  cwd?: string
+}
+
+/**
+ * The directory a git command operates in, after `-C`. `dir` is undefined
+ * when it cannot be known: no cwd, a placeholder (`$DIR`) in `-C`, or a
+ * `--git-dir`/`--work-tree` override.
+ */
+interface RepoLocation {
+  dir?: string
+}
+
+/** The hook directory every metamax repo uses (T3a of the harness spine). */
+const REPO_HOOKS_DIR = "scripts/git-hooks"
 
 /**
  * Git subcommands that are always safe (read-only or easily reversible).
@@ -105,17 +134,28 @@ const ALWAYS_DESTRUCTIVE = new Set([
  * Handles: git -C /path subcommand --flags args
  * Also captures -c config values for security inspection.
  */
-function parseGitCommand(args: string[]): { subcommand: string; flags: string[]; rest: string[]; configs: string[] } {
+function parseGitCommand(args: string[], repo?: GitRepo): { subcommand: string; flags: string[]; rest: string[]; configs: string[]; location: RepoLocation } {
   const remaining = [...args]
   const configs: string[] = []
+  let dir: string | undefined = repo?.cwd
 
   // Skip git-level flags before the subcommand
   // These are flags that go between "git" and the subcommand
   while (remaining.length > 0) {
     const arg = remaining[0]!
-    if (arg === "-C" || arg === "--git-dir" || arg === "--work-tree") {
+    if (arg === "-C") {
+      remaining.shift() // the flag
+      const value = remaining.shift() // the directory
+      // -C chains relative to the previous one, like git itself. A placeholder
+      // ($DIR) means the directory cannot be known.
+      dir = dir === undefined || value === undefined || value.includes("$") ? undefined : resolve(dir, value)
+    } else if (arg === "--git-dir" || arg === "--work-tree") {
       remaining.shift() // the flag
       remaining.shift() // its value
+      dir = undefined
+    } else if (arg.startsWith("--git-dir=") || arg.startsWith("--work-tree=")) {
+      remaining.shift()
+      dir = undefined
     } else if (arg === "-c") {
       remaining.shift() // the -c flag
       const configVal = remaining.shift() // the config key=value
@@ -131,15 +171,87 @@ function parseGitCommand(args: string[]): { subcommand: string; flags: string[];
   const flags: string[] = []
   const rest: string[] = []
 
-  for (const arg of remaining) {
+  // Flags whose value is a separate word, so the value is not mistaken for
+  // the remote or a refspec.
+  const valueFlags = VALUE_FLAGS[subcommand]
+  for (let i = 0; i < remaining.length; i++) {
+    const arg = remaining[i]!
     if (arg.startsWith("-")) {
       flags.push(arg)
+      if (valueFlags?.has(arg) && i + 1 < remaining.length) flags.push(remaining[++i]!)
     } else {
       rest.push(arg)
     }
   }
 
-  return { subcommand, flags, rest, configs }
+  return { subcommand, flags, rest, configs, location: { dir } }
+}
+
+/** Per-subcommand flags that take their value as the next word. */
+const VALUE_FLAGS: Record<string, Set<string>> = {
+  push: new Set(["-o", "--push-option", "--receive-pack", "--exec"]),
+}
+
+/**
+ * Whether a `core.hooksPath` value is the repository's own hook directory.
+ *
+ * Allowed when the value is a relative path inside the repository that
+ * exists as a directory and is either `scripts/git-hooks` or the directory
+ * `metamax.json`'s `worktreeSetup` sets. Anything else (an absolute path, a
+ * path that escapes the repo, a directory that does not exist, a repository
+ * we cannot locate) keeps the hard stop.
+ */
+function hooksPathAllowed(value: string, location: RepoLocation): { ok: true } | { ok: false; why: string } {
+  const no = (why: string) => ({ ok: false as const, why })
+  if (!value || value.includes("$")) return no("the value is not a literal path")
+  if (isAbsolute(value) || value.startsWith("~")) return no("the value is not a relative path inside the repository")
+  const rel = posix.normalize(value.replace(/\/+$/, ""))
+  if (rel === "." || rel === ".." || rel.startsWith("../")) return no("the value is not a relative path inside the repository")
+  if (!location.dir) return no("the repository cannot be located")
+  const top = gitTopLevel(location.dir)
+  if (!top) return no(`${location.dir} is not a git repository`)
+  const target = resolve(top, rel)
+  try {
+    if (!statSync(target).isDirectory()) return no(`${rel} is not a directory`)
+  } catch {
+    return no(`${rel} does not exist in the repository`)
+  }
+  if (rel === REPO_HOOKS_DIR) return { ok: true }
+  if (manifestHooksPaths(top).has(rel)) return { ok: true }
+  return no(`${rel} is neither ${REPO_HOOKS_DIR} nor the hook directory metamax.json's worktreeSetup sets`)
+}
+
+/** Every `core.hooksPath` value that `metamax.json`'s `worktreeSetup` commands set, normalized. */
+function manifestHooksPaths(top: string): Set<string> {
+  const paths = new Set<string>()
+  for (const cmd of readWorktreeSetup(top) ?? []) {
+    const tokens = tokenize(cmd)
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i]!
+      const lower = token.toLowerCase()
+      if (lower === "core.hookspath" && tokens[i + 1]) paths.add(posix.normalize(tokens[i + 1]!))
+      else if (lower.startsWith("core.hookspath=")) paths.add(posix.normalize(token.slice("core.hookspath=".length)))
+    }
+  }
+  return paths
+}
+
+/**
+ * Whether a push to a protected branch NAME stays off the protected
+ * repository: the remote is a local path, or the repository itself is a
+ * throwaway under a temp or scratchpad directory. A remote that cannot be
+ * resolved keeps the rule.
+ */
+function pushStaysLocal(remote: string | undefined, flags: string[], location: RepoLocation): boolean {
+  if (location.dir && isScratchDir(location.dir)) return true
+  const repoFlag = flags.find((f) => f.startsWith("--repo="))
+  const name = repoFlag ? repoFlag.slice("--repo=".length) : remote ?? "origin"
+  if (name.includes("$")) return false
+  // A URL or path given inline rather than a remote name.
+  if (/[/:]/.test(name) || name.startsWith(".") || name.startsWith("~")) return isLocalRemoteUrl(name)
+  if (!location.dir) return false
+  const url = gitRemoteUrl(location.dir, name)
+  return url !== null && isLocalRemoteUrl(url)
 }
 
 /**
@@ -156,6 +268,7 @@ export function checkGitCommand(
   argsOrCommand: string[] | string,
   customProtectedBranches?: Set<string>,
   customSafeSubcommands?: Set<string>,
+  repo?: GitRepo,
 ): GitDecision {
   const args = typeof argsOrCommand === "string"
     ? tokenize(argsOrCommand)
@@ -164,15 +277,24 @@ export function checkGitCommand(
   // Remove "git" if it's the first token
   if (args[0] === "git") args.shift()
 
-  const { subcommand, flags, rest, configs } = parseGitCommand(args)
+  const { subcommand, flags, rest, configs, location } = parseGitCommand(args, repo)
 
   if (!subcommand) return safe // bare "git" — safe (just shows help)
 
-  // Check for dangerous -c config values (e.g., git -c core.fsmonitor="evil" status)
+  // Check for dangerous -c config values (e.g., git -c core.fsmonitor="evil" status).
+  // core.hooksPath pointing at the repo's own hook directory is how a metamax
+  // worktree commits (T3a set scripts/git-hooks): allowed, every other value stops.
   for (const config of configs) {
-    const key = config.split("=")[0]!.toLowerCase()
+    const eq = config.indexOf("=")
+    const key = (eq === -1 ? config : config.slice(0, eq)).toLowerCase()
+    const value = eq === -1 ? "" : config.slice(eq + 1)
     for (const dangerous of DANGEROUS_GIT_CONFIGS) {
       if (key.startsWith(dangerous.toLowerCase())) {
+        if (key === "core.hookspath") {
+          const verdict = hooksPathAllowed(value, location)
+          if (verdict.ok) break
+          return hardUnsafe(`git: dangerous -c config ${key}`, `git -c sets executable config key "${key}" (${verdict.why})`)
+        }
         return hardUnsafe(`git: dangerous -c config ${key}`, `git -c sets executable config key "${key}"`)
       }
     }
@@ -195,11 +317,22 @@ export function checkGitCommand(
       if (readFlags.has(flag)) return safe
     }
     // git config key (no value) = read, git config key value = write
-    // If there are 2+ positional args, it's a write — check if the key is dangerous
-    if (rest.length >= 2) {
-      const key = rest[0]!.toLowerCase()
+    // If there are 2+ positional args, it's a write — check if the key is dangerous.
+    // `git config set key value` (git 2.46+) is the same write with a verb.
+    const positional = rest[0] === "set" ? rest.slice(1) : rest
+    if (positional.length >= 2) {
+      const key = positional[0]!.toLowerCase()
+      const value = positional[1]!
       for (const dangerous of DANGEROUS_GIT_CONFIGS) {
         if (key.startsWith(dangerous.toLowerCase())) {
+          if (key === "core.hookspath") {
+            // The repo's own hook directory, written into this repository
+            // (not --global/--system/--file, which would reach every repo).
+            const wide = flags.find((f) => ["--global", "--system", "--file", "-f", "--blob"].includes(f) || f.startsWith("--file="))
+            const verdict = wide ? { ok: false as const, why: `${wide} reaches beyond this repository` } : hooksPathAllowed(value, location)
+            if (verdict.ok) return safe
+            return hardUnsafe(`git: dangerous config write ${key}`, `git config sets executable key "${key}" (${verdict.why})`)
+          }
           return hardUnsafe(`git: dangerous config write ${key}`, `git config sets executable key "${key}"`)
         }
       }
@@ -263,12 +396,17 @@ export function checkGitCommand(
   // pushes to any branch of the working repo, and a human checkpoint before
   // main/staging is the whole point of listing them. A rebase onto one is
   // routine (it is how a branch catches up) and stays a judgment call.
+  // "Protected" is decided from the remote, not the branch name alone: a push
+  // to `main` of a throwaway repository whose origin is a local bare
+  // directory (or that lives under a temp directory) is not the checkpoint
+  // the rule exists for. A GitHub remote keeps it.
   if (BRANCH_GATED_SUBCOMMANDS.has(subcommand)) {
     const branches = customProtectedBranches ?? PROTECTED_BRANCHES
     const flag = subcommand === "push" ? hardUnsafe : unsafe
-    for (const arg of rest) {
+    for (const [i, arg] of rest.entries()) {
       const target = arg.includes(":") ? arg.split(":").pop()! : arg
       if (branches.has(target)) {
+        if (subcommand === "push" && pushStaysLocal(i >= 1 ? rest[0] : undefined, flags, location)) return safe
         return flag(`git: ${subcommand} to protected branch ${target}`, `git ${subcommand} to protected branch "${target}"`)
       }
     }
