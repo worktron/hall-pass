@@ -71,6 +71,7 @@ if (process.env.HALL_PASS === "off") {
 let toolName: string
 let toolInput: Record<string, unknown>
 let hookEvent: string
+let cwd: string | undefined
 let ctx: AuditContext
 try {
   const input = await Bun.stdin.text()
@@ -78,6 +79,7 @@ try {
   toolName = parsed?.tool_name ?? ""
   toolInput = parsed?.tool_input ?? {}
   hookEvent = parsed?.hook_event_name ?? "PreToolUse"
+  cwd = typeof parsed?.cwd === "string" && parsed.cwd ? parsed.cwd : process.cwd()
   ctx = {
     session: parsed?.session_id,
     tool_use_id: parsed?.tool_use_id,
@@ -110,5 +112,5 @@ const debug = createDebug(config)
 const audit = createAudit(config, ctx)
 const shfmtBin = findShfmt()
 
-const decision = await decide(toolName, toolInput, { config, shfmtBin, debug, audit, mode: ctx.mode })
+const decision = await decide(toolName, toolInput, { config, shfmtBin, debug, audit, mode: ctx.mode, cwd })
 emit(decision)

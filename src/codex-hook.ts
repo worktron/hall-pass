@@ -44,12 +44,14 @@ if (process.env.HALL_PASS === "off") {
 let toolName: string
 let toolInput: Record<string, unknown>
 let hookEvent: string
+let cwd: string | undefined
 let ctx: AuditContext
 try {
   const parsed = JSON.parse(await Bun.stdin.text())
   toolName = parsed?.tool_name ?? ""
   toolInput = (parsed?.tool_input ?? {}) as Record<string, unknown>
   hookEvent = parsed?.hook_event_name ?? "PreToolUse"
+  cwd = typeof parsed?.cwd === "string" && parsed.cwd ? parsed.cwd : process.cwd()
   ctx = {
     session: parsed?.session_id,
     tool_use_id: parsed?.tool_use_id,
@@ -86,6 +88,7 @@ const decision = await decide(toolName, toolInput, {
   debug,
   audit: event === "PreToolUse" ? audit : silentAudit,
   mode: ctx.mode,
+  cwd,
 })
 
 const output = codexOutput(event, decision, config)

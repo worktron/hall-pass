@@ -44,6 +44,8 @@ export interface EvalContext {
   protectedBranches?: Set<string>
   safeSubcommands?: Set<string>
   shfmtBin: string
+  /** Where the command runs (the hook's cwd); git rules that look at the repository use it. */
+  cwd?: string
   pipelineCommands: CommandInfo[]
   evaluate: (cmd: CommandInfo) => EvalResult
 }
@@ -55,6 +57,7 @@ export function createEvalContext(
   config: HallPassConfig,
   pipelineCommands: CommandInfo[],
   shfmtBin: string = "shfmt",
+  cwd?: string,
 ): EvalContext {
   const configSafe = new Set(config.commands.safe)
   const dbClients = new Set([...DB_CLIENTS, ...config.commands.db_clients])
@@ -72,6 +75,7 @@ export function createEvalContext(
     protectedBranches,
     safeSubcommands,
     shfmtBin,
+    cwd,
     pipelineCommands,
     evaluate: (cmd) => evaluateBashCommand(cmd, ctx),
   }
