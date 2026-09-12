@@ -69,19 +69,57 @@ function canonical(path: string): string {
 }
 
 /**
+ * The throwaway roots, canonical and without a trailing slash: the OS
+ * tmpdir, $TMPDIR, /tmp, macOS's /var/folders. A root of "/" would make
+ * every path a throwaway, so it is never one.
+ */
+function scratchRoots(): string[] {
+  return [tmpdir(), process.env.TMPDIR, "/tmp", "/var/folders"]
+    .filter((root): root is string => Boolean(root))
+    .map((root) => canonical(root).replace(/\/+$/, ""))
+    .filter((root) => root !== "")
+}
+
+/**
  * True when `dir` is under a temp directory (the OS tmpdir, /tmp, macOS's
  * /var/folders) or has a `scratchpad` segment: a repository there is a
  * throwaway, never the one whose main branch needs a human checkpoint.
  */
 export function isScratchDir(dir: string): boolean {
   const target = canonical(dir)
-  const roots = [tmpdir(), process.env.TMPDIR, "/tmp", "/var/folders"]
-    .filter((root): root is string => Boolean(root))
-    .map(canonical)
-  for (const root of roots) {
-    if (target === root || target.startsWith(root.endsWith("/") ? root : `${root}/`)) return true
+  for (const root of scratchRoots()) {
+    if (target === root || target.startsWith(`${root}/`)) return true
   }
   return target.split("/").includes("scratchpad")
+}
+
+/**
+ * True when `path` is strictly below a throwaway root: a file or directory
+ * inside the OS tmpdir, $TMPDIR, /tmp, /var/folders, or a `scratchpad`
+ * directory, never one of those directories itself. `isScratchDir` answers
+ * "is this repository a throwaway"; this answers "may this path be deleted
+ * without asking", and `rm -rf /tmp` is not that. A symlink is followed, so
+ * a link under /tmp that points into the home directory is not inside.
+ */
+export function isInsideScratchDir(path: string): boolean {
+  const target = canonical(path).replace(/\/+$/, "")
+  const roots = scratchRoots()
+  if (roots.includes(target)) return false   // a root itself, even one that sits below another root
+  for (const root of roots) {
+    if (target.startsWith(`${root}/`)) return true
+  }
+  const segments = target.split("/")
+  const at = segments.indexOf("scratchpad")
+  return at !== -1 && at < segments.length - 1
+}
+
+/**
+ * True when `path` (relative to `dir`, or absolute) is a file the
+ * repository containing `dir` tracks: `git ls-files --error-unmatch` exits 0.
+ * One git call for the whole question, never one per token.
+ */
+export function gitTracksFile(dir: string, path: string): boolean {
+  return gitQuery(dir, ["ls-files", "--error-unmatch", "--", path]) !== null
 }
 
 /** The `worktreeSetup` commands of `metamax.json` at `top`, or null when absent. */
