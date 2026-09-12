@@ -6,6 +6,41 @@
  * chains (&&/||), loops, conditionals, subshells, and command substitutions.
  */
 
+/**
+ * The operator codes shfmt --tojson emits, for the shfmt install.ts pins
+ * (bin/shfmt, v3.13.0). shfmt renumbers them between minor versions: v3.12
+ * counted redirects from 54 and binary operators from 10, v3.13 from 63 and
+ * 11. Read them off `bin/shfmt -ln bash --tojson`, never from memory;
+ * parser.test.ts checks every one against the bundled binary, and
+ * shfmt-version.test.ts that the bundled binary is the pinned version.
+ */
+export const REDIR = {
+  out: 63, // >
+  append: 64, // >>
+  in: 65, // <
+  readWrite: 66, // <>
+  dupIn: 67, // <&
+  dupOut: 68, // >&
+  clobber: 69, // >|
+  hdoc: 71, // <<
+  dashHdoc: 72, // <<-
+  wordHdoc: 73, // <<<
+  allOut: 74, // &>
+  allAppend: 76, // &>>
+} as const
+
+/** Redirects that can create, truncate, or clobber the path they name. */
+export const WRITE_OPS: ReadonlySet<number> = new Set([
+  REDIR.out, REDIR.append, REDIR.readWrite, REDIR.clobber, REDIR.allOut, REDIR.allAppend,
+])
+
+export const BINARY = {
+  and: 11, // &&
+  or: 12, // ||
+  pipe: 13, // |
+  pipeAll: 14, // |&
+} as const
+
 export interface CommandInfo {
   /** The command name, e.g., "git", "grep" */
   name: string
@@ -81,10 +116,10 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
     return commands
   }
 
-  // Pipe (12 = |, 13 = |&) — the right-hand side reads its standard input
+  // Pipe (| and |&) — the right-hand side reads its standard input
   // from the left. Pipes nest left-associatively, so `a | b | c` is
   // BinaryCmd(a|b, c) and each level marks its own right-hand command.
-  if (n.Type === "BinaryCmd" && (n.Op === 12 || n.Op === 13)) {
+  if (n.Type === "BinaryCmd" && (n.Op === BINARY.pipe || n.Op === BINARY.pipeAll)) {
     const left = extractCommandInfos(n.X)
     const right = extractCommandInfos(n.Y)
     if (right.length > 0) right[0]!.stdinFromPipe = true
@@ -122,8 +157,7 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
  * Concatenate the literal text every heredoc/herestring in a Stmt's Redirs
  * feeds to standard input. Returns null when there is none.
  *
- * Op values from shfmt's syntax.RedirOperator (verified against shfmt v3.12+):
- *   61 = <<    62 = <<-    63 = <<<
+ * The operator values are REDIR, read off the pinned shfmt.
  * << and <<- carry their body in .Hdoc; <<< puts its string in .Word.
  * Only FULLY LITERAL bodies are returned. A quoted delimiter (`<<'EOF'`)
  * suppresses expansion and yields one literal — the common case, and the
@@ -141,8 +175,8 @@ function extractHeredocText(redirs: Array<Record<string, unknown>>): string | nu
     const op = redir.Op as number | undefined
     // << and <<- carry the body in .Hdoc; <<< puts its string in .Word.
     const source =
-      op === 61 || op === 62 ? redir.Hdoc :
-      op === 63 ? redir.Word :
+      op === REDIR.hdoc || op === REDIR.dashHdoc ? redir.Hdoc :
+      op === REDIR.wordHdoc ? redir.Word :
       undefined
     if (!source || typeof source !== "object") continue
 
@@ -190,15 +224,12 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
       const path = word ? extractWordValue(word) : null
       if (!path) continue
 
-      // Op values from shfmt's syntax.RedirOperator (verified against shfmt v3.12+):
-      // 54 = >    55 = >>    56 = <      57 = <>     59 = >& (dup FD)
-      // 60 = >|   61 = <<    63 = <<<    64 = &>     65 = &>>
-      // Treat as write: redirect operators that can clobber a file path target.
-      // <> is read-write — counted as write because it can truncate/create.
-      // 59 (>&) targets a file descriptor, not a path — leave as read so the
-      // path check skips it (the "path" is just a numeric FD).
+      // Treat as write: redirect operators that can clobber a file path target
+      // (REDIR holds the values). <> is read-write, counted as write because it
+      // can truncate or create. >& targets a file descriptor, not a path, so it
+      // stays read and the path check skips it (the "path" is a numeric FD).
       const op = redir.Op as number | undefined
-      const isWrite = op !== undefined && (op === 54 || op === 55 || op === 57 || op === 60 || op === 64 || op === 65)
+      const isWrite = op !== undefined && WRITE_OPS.has(op)
       results.push({ path, op: isWrite ? "write" : "read" })
     }
   }
@@ -221,9 +252,8 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
  * Extract the names of commands that are genuine pipe targets — the
  * right-hand side of a `|` or `|&` pipe.
  *
- * Op values from shfmt's syntax.BinaryOperator (verified against shfmt v3.12+):
- *   10 = &&   11 = ||   12 = |   13 = |&
- * Only 12 and 13 are real pipes. This deliberately does NOT match `&&`/`||`
+ * The operator values are BINARY, read off the pinned shfmt.
+ * Only | and |& are real pipes. This deliberately does NOT match `&&`/`||`
  * chains (which run sequentially, not piped) or `;`-separated statements
  * (which shfmt represents as separate Stmts, not a BinaryCmd). So
  * `git rebase && bash deploy.sh` is NOT reported as a pipe into bash, while
@@ -235,7 +265,7 @@ export function extractPipeTargets(node: unknown): string[] {
   const n = node as Record<string, unknown>
   const results: string[] = []
 
-  if (n.Type === "BinaryCmd" && (n.Op === 12 || n.Op === 13)) {
+  if (n.Type === "BinaryCmd" && (n.Op === BINARY.pipe || n.Op === BINARY.pipeAll)) {
     const name = leftmostCommandName(n.Y)
     if (name) results.push(name)
   }
