@@ -23,6 +23,8 @@ This correctly handles:
 - Redirects: `bun run build 2>&1`
 - Nested commands: `echo $(cat $(find . -name foo))`
 
+Two commands are judged by their operands rather than their name. `rm` is auto-approved when every target is a literal path strictly inside a throwaway root (the OS temp directory, `$TMPDIR`, `/tmp`, `/var/folders`, or a `scratchpad` directory) with no `..` segment: `rm /tmp/edit.py`, `rm -rf $TMPDIR/build`, `rm -f <scratchpad>/dbg.test.ts`. A target anywhere else, a bare `rm -rf`, a root itself (`rm -rf /tmp`), a glob, a variable, or a symlink that points out of the root keeps the prompt. `bash <file>` (`sh`, `zsh`) is auto-approved when the file is a regular file tracked by the repository the command runs in, reached by a path with no `..`: `bash scripts/ship-gates.sh` from a checkout is the same act as `./scripts/ship-gates.sh`. An untracked file, a file outside the repository, a tracked symlink out of the tree, `-c`, and a script on stdin (`bash -`, a heredoc, `curl … | bash`) keep the prompt.
+
 ### Layer 2: Git safety
 
 Git commands get deeper inspection of subcommands and flags. Safe operations are auto-approved; destructive ones prompt.
