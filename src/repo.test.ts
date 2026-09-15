@@ -9,7 +9,7 @@ describe("isLocalRemoteUrl", () => {
 
   const remote = [
     "git@github.com:worktron/x.git",
-    "git@github.com-worktron:worktron/hall-pass.git",
+    "git@github.com-work:worktron/hall-pass.git",
     "https://github.com/worktron/x.git",
     "ssh://git@github.com/worktron/x.git",
     "git://example.com/x.git",
