@@ -1084,7 +1084,7 @@ describe("repository-aware git rules (cwd)", () => {
   })
 
   test("git config core.hooksPath /tmp/x still stops, in every mode", async () => {
-    for (const mode of [undefined, "default", "auto", "bypassPermissions"]) {
+    for (const mode of [undefined, "default", "auto", "plan", "bypassPermissions"]) {
       const d = await judge("git config core.hooksPath /tmp/x", metamaxLike, mode)
       expect(d.decision).toBe("ask")
       if (d.decision === "ask") {
@@ -1105,7 +1105,7 @@ describe("repository-aware git rules (cwd)", () => {
   })
 
   test("git push origin main still stops when origin is GitHub, in every mode", async () => {
-    for (const mode of [undefined, "default", "auto", "bypassPermissions"]) {
+    for (const mode of [undefined, "default", "auto", "plan", "bypassPermissions"]) {
       const d = await judge("git push origin main", metamaxLike, mode)
       expect(d.decision).toBe("ask")
       if (d.decision === "ask") {

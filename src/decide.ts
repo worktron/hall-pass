@@ -68,12 +68,19 @@ export interface DecideDeps {
  * 96%. So here the hook steps aside on judgment calls and keeps "ask" for
  * the hard stops only (EvalResult.hard, and the pre-parse checks below).
  *
+ * Plan mode runs shell commands through the same classifier while the
+ * `useAutoModeDuringPlan` setting is on, its default (Claude Code's
+ * permission-modes docs). The audit log agrees: from 2026-09-12 to
+ * 2026-10-01, 8 of 8 plan-mode "pass" decisions ran with no native prompt,
+ * while 9 of 12 plan-mode "ask"s drew one about 6s later; one session was
+ * stopped five times on an rm of its own scratchpad. With that setting off,
+ * a "pass" falls back to Claude Code's own prompt, so nothing goes unasked.
+ *
  * Not listed: `default`/`acceptEdits` (Claude Code would prompt natively for
  * the same command, so "ask" costs nothing and carries a better message),
- * `plan` (commands may or may not reach the classifier), `dontAsk` (a
- * "pass" there is a denial).
+ * `dontAsk` (a "pass" there is a denial).
  */
-export const DEFER_MODES = new Set(["auto", "bypassPermissions"])
+export const DEFER_MODES = new Set(["auto", "bypassPermissions", "plan"])
 
 function defersToClassifier(deps: DecideDeps): boolean {
   return deps.config.classifier.defer && DEFER_MODES.has(deps.mode ?? "")

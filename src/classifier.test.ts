@@ -68,10 +68,9 @@ const HARD_STOPS: Array<[string, string]> = [
 ]
 
 describe("DEFER_MODES", () => {
-  test("auto and bypassPermissions defer; default, acceptEdits, plan, dontAsk do not", () => {
-    expect(DEFER_MODES.has("auto")).toBe(true)
-    expect(DEFER_MODES.has("bypassPermissions")).toBe(true)
-    for (const m of ["default", "acceptEdits", "plan", "dontAsk", ""]) expect(DEFER_MODES.has(m)).toBe(false)
+  test("auto, bypassPermissions and plan defer; default, acceptEdits, dontAsk do not", () => {
+    for (const m of ["auto", "bypassPermissions", "plan"]) expect(DEFER_MODES.has(m)).toBe(true)
+    for (const m of ["default", "acceptEdits", "dontAsk", ""]) expect(DEFER_MODES.has(m)).toBe(false)
   })
 })
 
@@ -99,12 +98,14 @@ describe("judgment calls", () => {
       expect(last.layer).toBe("classifier")
     })
 
-    test(`bypassPermissions hands over: ${command}`, async () => {
-      const { d } = await run(command, "bypassPermissions")
-      expect(d.decision).toBe("pass")
-    })
+    for (const mode of ["bypassPermissions", "plan"]) {
+      test(`${mode} hands over: ${command}`, async () => {
+        const { d } = await run(command, mode)
+        expect(d.decision).toBe("pass")
+      })
+    }
 
-    for (const mode of ["acceptEdits", "plan", "dontAsk"]) {
+    for (const mode of ["acceptEdits", "dontAsk"]) {
       test(`${mode} still asks: ${command}`, async () => {
         const { d } = await run(command, mode)
         expect(d.decision).toBe("ask")
@@ -112,18 +113,28 @@ describe("judgment calls", () => {
     }
   }
 
-  test("classifier.defer = false restores the old behavior in auto mode", async () => {
+  test("plan mode hands an rm outside any throwaway directory to the classifier", async () => {
+    const { d, logged } = await run("rm -rf /Users/x/somewhere", "plan")
+    expect(d).toEqual({ decision: "pass", reason: "deferred to classifier: dangerous: rm" })
+    const last = logged[logged.length - 1]!
+    expect(last.reason).toBe("deferred: dangerous: rm")
+    expect(last.layer).toBe("classifier")
+  })
+
+  test("classifier.defer = false restores the old behavior in auto and plan mode", async () => {
     const config = { ...(await getConfig()), classifier: { defer: false } }
     for (const [command] of JUDGMENT_CALLS) {
-      const { d } = await run(command, "auto", config)
-      expect(d.decision).toBe("ask")
+      for (const mode of ["auto", "plan"]) {
+        const { d } = await run(command, mode, config)
+        expect(d.decision).toBe("ask")
+      }
     }
   })
 })
 
 describe("hard stops ask in every mode", () => {
   for (const [command, reason] of HARD_STOPS) {
-    for (const mode of ["auto", "bypassPermissions", "default", undefined]) {
+    for (const mode of ["auto", "bypassPermissions", "plan", "default", undefined]) {
       test(`${mode ?? "no mode"}: ${command}`, async () => {
         const { d } = await run(command, mode)
         expect(d.decision).toBe("ask")

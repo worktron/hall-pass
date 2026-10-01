@@ -92,7 +92,7 @@ A hook that answers `ask` forces a permission prompt in **every** permission mod
 
 The audit log from a month of real use said it plainly: in auto mode, a hall-pass `ask` was followed by a visible prompt 76% of the time and a hall-pass `pass` (no opinion) 2% of the time; both ran 96% of the time. hall-pass was the source of nine prompts in ten, and the user approved nearly all of them.
 
-So hall-pass is mode-aware. In `auto` mode (and `bypassPermissions`, which is the user saying "don't ask"), it hands judgment calls to the classifier — it answers nothing, and Claude Code proceeds through its own review. It still answers `ask` for the **hard stops**, in every mode:
+So hall-pass is mode-aware. In `auto` mode, `plan` mode (which runs shell commands through the same classifier while Claude Code's `useAutoModeDuringPlan` setting is on, its default), and `bypassPermissions` (the user saying "don't ask"), it hands judgment calls to the classifier — it answers nothing, and Claude Code proceeds through its own review. It still answers `ask` for the **hard stops**, in every mode:
 
 - reads, writes, or redirects to protected paths (`~/.ssh`, `.env`, `*.pem`, …)
 - a hardcoded secret in a command or in file content
@@ -208,7 +208,7 @@ enabled = true
 path = "~/.config/hall-pass/audit.jsonl"
 
 [classifier]
-# In auto mode (and bypassPermissions), hand judgment calls to Claude Code's
+# In auto and plan mode (and bypassPermissions), hand judgment calls to Claude Code's
 # classifier instead of forcing a prompt. Hard stops always prompt. Default true.
 defer = true
 
@@ -287,7 +287,7 @@ Input from Claude Code: { tool_name, tool_input }
                |
                +-- unknown → pass (no opinion; Claude Code decides)
                |
-               Then, in auto mode / bypassPermissions:
+               Then, in auto / plan / bypassPermissions mode:
                  hard stop (protected path, secret, injection,
                  push to protected branch)? → prompt, as in every mode
                  any other prompt?          → pass — the classifier judges it
