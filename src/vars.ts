@@ -21,7 +21,8 @@
  *   - not a variable the shell maintains itself (`PWD`, `_`, `REPLY`…).
  * And nothing resolves at all when the script can write a variable whose
  * name its text does not show: it runs a string as code (`eval`, `source`,
- * `trap`, a command whose name is an expansion), names a writer's target
+ * `trap`, a command whose name is an expansion, unless the shell can only
+ * run it as a file: `$S/loop.sh`, `./$X`), names a writer's target
  * with an expansion (`read $V`), declares a nameref or integer variable,
  * does any arithmetic (bash evaluates a variable's value as an expression,
  * so `X='S=5'; (( X ))` assigns S), or touches IFS.
@@ -82,6 +83,17 @@ export function resolveRead(part: Node, vars: LiteralVars): string | null {
 }
 
 export function literalVariables(ast: unknown): Map<string, LiteralVar> {
+  const vars = candidates(ast)
+  if (vars.size === 0) return vars
+
+  const scan = scanWriters(ast, vars)
+  if (scan.unbounded) return new Map()
+  for (const name of vars.keys()) if (dropped(scan, name)) vars.delete(name)
+  return vars
+}
+
+/** Variables set the way literalVariables needs, before anything that could change them is ruled out. */
+function candidates(ast: unknown): Map<string, LiteralVar> {
   const vars = new Map<string, LiteralVar>()
   const stmts = (ast as Node | null)?.Stmts
   if (!Array.isArray(stmts)) return vars
@@ -103,15 +115,12 @@ export function literalVariables(ast: unknown): Map<string, LiteralVar> {
       vars.set(name, { value, after: end })
     }
   }
-  if (vars.size === 0) return vars
-
-  const scan = scanWriters(ast)
-  if (scan.unbounded) return new Map()
-  for (const name of vars.keys()) {
-    const named = scan.writerText.some((text) => text.includes(name))
-    if (scan.assigns.get(name) !== 1 || scan.doubted.has(name) || named) vars.delete(name)
-  }
   return vars
+}
+
+/** True when the scan shows a way the variable can be written other than its one assignment. */
+function dropped(scan: WriterScan, name: string): boolean {
+  return scan.assigns.get(name) !== 1 || scan.doubted.has(name) || scan.writerText.some((text) => text.includes(name))
 }
 
 interface WriterScan {
@@ -125,8 +134,15 @@ interface WriterScan {
   unbounded: boolean
 }
 
-export function scanWriters(ast: unknown): WriterScan {
+/**
+ * `known` are the variables a command word may read and still be judged a
+ * path (`$S/loop.sh`); the scan counts on each one it uses, and is unbounded
+ * when that variable turns out not to be known after all.
+ */
+export function scanWriters(ast: unknown, known: LiteralVars = candidates(ast)): WriterScan {
   const scan: WriterScan = { assigns: new Map(), doubted: new Set(), writerText: [], unbounded: false }
+  const reliedOn = new Set<string>()
+  const isPath = (word: Node) => pathWord(word, known, reliedOn)
 
   const countAssign = (assign: Node) => {
     const name = (assign.Name as Node | undefined)?.Value
@@ -156,7 +172,7 @@ export function scanWriters(ast: unknown): WriterScan {
     switch (n.Type) {
       case "CallExpr": {
         for (const assign of (n.Assigns as Node[] | undefined) ?? []) countAssign(assign)
-        const name = commandName(n)
+        const name = commandName(n, isPath)
         const args = ((n.Args as Node[] | undefined) ?? []).slice(1)
         if (name === null || EVALUATORS.has(name)) scan.unbounded = true
         else if (VARIABLE_WRITERS.has(name) || (name === "printf" && writesWithV(n))) writerArgs(args)
@@ -222,6 +238,7 @@ export function scanWriters(ast: unknown): WriterScan {
 
   walk(ast)
   if (scan.writerText.some((text) => text.includes("IFS"))) scan.unbounded = true
+  for (const name of reliedOn) if (dropped(scan, name)) scan.unbounded = true
   return scan
 }
 
@@ -230,19 +247,68 @@ export function scanWriters(ast: unknown): WriterScan {
  * Null when the name is itself an expansion (`$X …` could be `eval`), or
  * literal text the shell expands into other words (`{eval,S=/}` runs
  * `eval S=/`; `ev?l` can match a file named eval).
+ * A word the shell runs as a file (isPath) is "/": no builtin has that name.
  * A bare assignment has no name, and runs nothing: "".
  */
-function commandName(call: Node): string | null {
+function commandName(call: Node, isPath: (word: Node) => boolean): string | null {
   const words = (call.Args as Node[] | undefined) ?? []
   let i = 0
   while (i < words.length) {
     const text = literalText(words[i]!)
-    if (text === null || NAME_EXPANSION.test(unquotedText(words[i]!))) return null
+    if (text === null) return isPath(words[i]!) ? "/" : null
+    if (NAME_EXPANSION.test(unquotedText(words[i]!))) return null
     if (text !== "command" && text !== "builtin") return text
     i++
     while (i < words.length && literalText(words[i]!)?.startsWith("-")) i++
   }
   return ""
+}
+
+/**
+ * True when the shell runs a command word as a file: a `/` reaches its first
+ * field before anything that could split the word in two. Bash looks up
+ * builtins, functions and `eval` only for a name with no slash, and a file
+ * runs in a child process, which cannot write this shell's variables.
+ * `$S/loop.sh` counts when S is a known variable read after its assignment
+ * (its value is an absolute path with no whitespace or glob), and so do
+ * `./$X`, `"$X"/x` and `~/bin/x`. `$X/foo` does not: X='eval S=/ #' splits it
+ * into `eval` and `S=/`. Nor does a `/` inside a brace (`{eval,/}`).
+ * Each known variable the answer used goes into `used`.
+ */
+function pathWord(word: Node, known: LiteralVars, used: Set<string>): boolean {
+  for (const part of (word.Parts as Node[] | undefined) ?? []) {
+    switch (part.Type) {
+      case "Lit": {
+        const text = String(part.Value ?? "")
+        const slash = text.indexOf("/")
+        if ((slash < 0 ? text : text.slice(0, slash)).includes("{")) return false
+        if (slash >= 0) return true
+        break
+      }
+      case "SglQuoted":
+        if (String(part.Value ?? "").includes("/")) return true
+        break
+      case "DblQuoted":
+        // Nothing inside double quotes splits, so any `/` in them is in the first field.
+        for (const inner of (part.Parts as Node[] | undefined) ?? []) {
+          if (inner.Type === "Lit" && String(inner.Value ?? "").includes("/")) return true
+          if (knownPath(inner, known, used)) return true
+        }
+        break
+      case "ParamExp":
+        return knownPath(part, known, used)
+      default:
+        return false
+    }
+  }
+  return false
+}
+
+/** A read of a known variable, whose value always starts with `/`. */
+function knownPath(part: Node, known: LiteralVars, used: Set<string>): boolean {
+  if (resolveRead(part, known) === null) return false
+  used.add(String((part.Param as Node).Value))
+  return true
 }
 
 /** `printf -v NAME` or `printf -vNAME`: printf stores its output in a variable. */
