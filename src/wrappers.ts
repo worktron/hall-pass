@@ -87,7 +87,6 @@ export function unwrapCommand(cmdInfo: CommandInfo): CommandInfo {
     args: innerArgs,
     assigns: cmdInfo.assigns, // pass through env var assigns
   }
-  if (cmdInfo.resolvedArgs) innerCmd.resolvedArgs = cmdInfo.resolvedArgs.slice(1).slice(innerStart)
 
   // Recurse to handle nesting
   return unwrapCommand(innerCmd)

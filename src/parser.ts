@@ -85,13 +85,6 @@ export interface CommandInfo {
    * arrives on stdin, from `python3 report.py`, where stdin is only data.
    */
   stdinFromPipe?: boolean
-  /**
-   * `args` with each plain read of a variable the line itself set to a
-   * literal path replaced by that path (see vars.ts); every other expansion
-   * keeps its placeholder. Present only when the caller passed the line's
-   * variables and something resolved. Only rules that opt in read it.
-   */
-  resolvedArgs?: string[]
 }
 
 export interface RedirectInfo {
@@ -121,7 +114,10 @@ export function extractCommands(node: unknown): string[] {
 }
 
 /**
- * Extract full command info including arguments.
+ * Extract full command info including arguments. With the line's known
+ * variables (vars.ts), each plain read of one renders as its value in the
+ * name and arguments, so every rule judges `f=/x; sed -i … $f` as it judges
+ * `sed -i … /x`, and `$PSQL …` as the psql it runs.
  */
 export function extractCommandInfos(node: unknown, vars?: LiteralVars): CommandInfo[] {
   if (!node || typeof node !== "object") return []
@@ -156,20 +152,16 @@ export function extractCommandInfos(node: unknown, vars?: LiteralVars): CommandI
 
   // CallExpr = a command invocation
   if (n.Type === "CallExpr" && Array.isArray(n.Args) && n.Args.length > 0) {
-    const words = (n.Args as Array<Record<string, unknown>>).filter((w) => extractWordValue(w))
-    const args = words.map((w) => extractWordValue(w)!)
+    const args = (n.Args as Array<Record<string, unknown>>)
+      .map((w) => extractWordValue(w, vars))
+      .filter((a): a is string => a !== null)
     if (args.length > 0) {
       const name = args[0]!.split("/").pop()!
-      const info: CommandInfo = {
+      commands.push({
         name,
         args: [name, ...args.slice(1)],
         assigns: extractAssigns(n),
-      }
-      if (vars && vars.size > 0) {
-        const resolved = words.slice(1).map((w) => extractWordValue(w, vars)!)
-        if (resolved.some((r, i) => r !== args[i + 1])) info.resolvedArgs = [name, ...resolved]
-      }
-      commands.push(info)
+      })
     }
   }
 
@@ -243,9 +235,10 @@ function isFullyLiteral(word: Record<string, unknown>): boolean {
 
 /**
  * Extract all redirect targets from the entire AST.
- * Returns a flat list — every redirect in every statement.
+ * Returns a flat list — every redirect in every statement. A known
+ * variable (vars.ts) renders as its value.
  */
-export function extractRedirects(node: unknown): RedirectInfo[] {
+export function extractRedirects(node: unknown, vars?: LiteralVars): RedirectInfo[] {
   if (!node || typeof node !== "object") return []
 
   const n = node as Record<string, unknown>
@@ -255,7 +248,7 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
   if (Array.isArray(n.Redirs)) {
     for (const redir of n.Redirs as Array<Record<string, unknown>>) {
       const word = redir.Word as Record<string, unknown> | undefined
-      const path = word ? extractWordValue(word) : null
+      const path = word ? extractWordValue(word, vars) : null
       if (!path) continue
 
       // Treat as write: redirect operators that can clobber a file path target
@@ -275,10 +268,10 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
   for (const value of Object.values(n)) {
     if (Array.isArray(value)) {
       for (const item of value) {
-        results.push(...extractRedirects(item))
+        results.push(...extractRedirects(item, vars))
       }
     } else if (typeof value === "object" && value !== null) {
-      results.push(...extractRedirects(value))
+      results.push(...extractRedirects(value, vars))
     }
   }
 
@@ -294,16 +287,17 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
  * chains (which run sequentially, not piped) or `;`-separated statements
  * (which shfmt represents as separate Stmts, not a BinaryCmd). So
  * `git rebase && bash deploy.sh` is NOT reported as a pipe into bash, while
- * `curl x | bash` is.
+ * `curl x | bash` is. A known variable (vars.ts) renders as its value, so
+ * `SH=/bin/bash; curl x | $SH` is a pipe into bash.
  */
-export function extractPipeTargets(node: unknown): string[] {
+export function extractPipeTargets(node: unknown, vars?: LiteralVars): string[] {
   if (!node || typeof node !== "object") return []
 
   const n = node as Record<string, unknown>
   const results: string[] = []
 
   if (n.Type === "BinaryCmd" && (n.Op === BINARY.pipe || n.Op === BINARY.pipeAll)) {
-    const name = leftmostCommandName(n.Y)
+    const name = leftmostCommandName(n.Y, vars)
     if (name) results.push(name)
   }
 
@@ -311,9 +305,9 @@ export function extractPipeTargets(node: unknown): string[] {
   // command substitutions, loops, etc.)
   for (const value of Object.values(n)) {
     if (Array.isArray(value)) {
-      for (const item of value) results.push(...extractPipeTargets(item))
+      for (const item of value) results.push(...extractPipeTargets(item, vars))
     } else if (typeof value === "object" && value !== null) {
-      results.push(...extractPipeTargets(value))
+      results.push(...extractPipeTargets(value, vars))
     }
   }
 
@@ -325,17 +319,17 @@ export function extractPipeTargets(node: unknown): string[] {
  * Descends through Stmt wrappers and the left side of nested pipes so that
  * `a | b | c` reports both `b` and `c` as pipe targets.
  */
-function leftmostCommandName(node: unknown): string | null {
+function leftmostCommandName(node: unknown, vars?: LiteralVars): string | null {
   if (!node || typeof node !== "object") return null
 
   const n = node as Record<string, unknown>
   // Stmt wraps the actual command in .Cmd
-  if (n.Cmd) return leftmostCommandName(n.Cmd)
+  if (n.Cmd) return leftmostCommandName(n.Cmd, vars)
   // Nested pipe/chain — the immediate target is the left operand
-  if (n.Type === "BinaryCmd") return leftmostCommandName(n.X)
+  if (n.Type === "BinaryCmd") return leftmostCommandName(n.X, vars)
   // CallExpr — extract the command name (strip any path prefix)
   if (n.Type === "CallExpr" && Array.isArray(n.Args) && n.Args.length > 0) {
-    const first = extractWordValue(n.Args[0] as Record<string, unknown>)
+    const first = extractWordValue(n.Args[0] as Record<string, unknown>, vars)
     return first ? first.split("/").pop()! : null
   }
   return null

@@ -5,15 +5,20 @@
  *   S=/tmp/claude-501/…/scratchpad/mt2; rm -rf $S; mkdir -p $S
  *
  * The parser renders `$S` as a placeholder, so a rule that judges paths
- * (throwawayRm) cannot see that `$S` is a scratch directory. literalVariables
+ * (throwawayRm, sed -i, a protected-path check) cannot see that `$S` is a
+ * scratch directory, and `$PSQL …` names no command at all. literalVariables
  * finds the variables whose value at every later read is known from the text
- * alone; extractCommandInfos substitutes them into CommandInfo.resolvedArgs.
+ * alone; extractCommandInfos and extractRedirects render them as that value,
+ * so every rule judges the line as if the value were typed out.
  *
  * The rule is strict, and any doubt drops the variable:
- *   - set by a bare assignment that is its own top-level statement (not
- *     `S=x cmd`, not inside `&&`, `if`, a loop, a subshell or a function),
- *     not backgrounded, to a literal absolute path with no whitespace,
- *     backslash, tilde or glob character;
+ *   - set by a bare assignment that is its own top-level statement, or
+ *     starts a top-level `&&` chain (`f=x && sed -i … $f`, and
+ *     `f=x && g=y && …` while every assignment before it is literal, so it
+ *     cannot fail), not `S=x cmd`, not later in a chain, not after `||`, not
+ *     inside `if`, a loop, a subshell or a function, not backgrounded, to a
+ *     literal absolute path with no whitespace, backslash, tilde or glob
+ *     character;
  *   - assigned exactly once anywhere in the script;
  *   - never named by anything else that can write it: `for S in`, `read`,
  *     `printf -v`, `unset`, `export`/`declare`/`local`, `${S:=x}`,
@@ -29,6 +34,8 @@
  * Only a plain read (`$S`, `${S}`) that comes after the assignment in the
  * text resolves; `${S:-x}` and other expansions keep their placeholder.
  */
+
+import { BINARY } from "./parser.ts"
 
 export interface LiteralVar {
   /** The value the assignment gives the variable. */
@@ -98,11 +105,8 @@ function candidates(ast: unknown): Map<string, LiteralVar> {
   const stmts = (ast as Node | null)?.Stmts
   if (!Array.isArray(stmts)) return vars
 
-  for (const stmt of stmts as Node[]) {
-    const cmd = stmt.Cmd as Node | undefined
-    if (!cmd || cmd.Type !== "CallExpr") continue
-    if ((cmd.Args as unknown[] | undefined)?.length) continue
-    if (stmt.Background || stmt.Coprocess || stmt.Negated || (stmt.Redirs as unknown[] | undefined)?.length) continue
+  for (const stmt of (stmts as Node[]).flatMap((s) => leadingAssignments(s).stmts)) {
+    const cmd = stmt.Cmd as Node
     const end = (stmt.End as Node | undefined)?.Offset
     if (typeof end !== "number") continue
     for (const assign of (cmd.Assigns as Node[] | undefined) ?? []) {
@@ -116,6 +120,31 @@ function candidates(ast: unknown): Map<string, LiteralVar> {
     }
   }
   return vars
+}
+
+/**
+ * The bare assignments a top-level statement runs before anything else:
+ * the statement itself, or the leading elements of an `&&` chain (also
+ * when the chain is the left side of `||`, which runs first). A later
+ * element runs only after every one before it succeeded, so it counts only
+ * when those are all literal assignments, which cannot fail. `whole` says
+ * every element of `stmt` was one.
+ */
+function leadingAssignments(stmt: Node): { stmts: Node[]; whole: boolean } {
+  const none = { stmts: [], whole: false }
+  if (stmt.Background || stmt.Coprocess || stmt.Negated || (stmt.Redirs as unknown[] | undefined)?.length) return none
+  const cmd = stmt.Cmd as Node | undefined
+  // `a || b` runs a first, then b only when a failed.
+  if (cmd?.Type === "BinaryCmd" && cmd.Op === BINARY.or) return { stmts: leadingAssignments(cmd.X as Node).stmts, whole: false }
+  if (cmd?.Type === "BinaryCmd" && cmd.Op === BINARY.and) {
+    const left = leadingAssignments(cmd.X as Node)
+    if (!left.whole) return { stmts: left.stmts, whole: false }
+    const right = leadingAssignments(cmd.Y as Node)
+    return { stmts: [...left.stmts, ...right.stmts], whole: right.whole }
+  }
+  if (cmd?.Type !== "CallExpr" || (cmd.Args as unknown[] | undefined)?.length) return none
+  const literal = ((cmd.Assigns as Node[] | undefined) ?? []).every((a) => !a.Value || literalText(a.Value as Node) !== null)
+  return { stmts: [stmt], whole: literal }
 }
 
 /** True when the scan shows a way the variable can be written other than its one assignment. */

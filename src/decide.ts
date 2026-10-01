@@ -233,7 +233,10 @@ export async function decide(
 
   // -- Extract commands and AST-level data --
 
-  const commandInfos = extractCommandInfos(ast, literalVariables(ast))
+  // Variables the line sets to a path nothing else can change read as that
+  // path everywhere below (vars.ts): `f=/x && sed -i … $f` is `sed -i … /x`.
+  const known = literalVariables(ast)
+  const commandInfos = extractCommandInfos(ast, known)
   debug("commands", commandInfos.map((c) => c.name))
 
   // Every value a variable could hold on this line (values.ts). The checks
@@ -244,7 +247,7 @@ export async function decide(
   const values = possibleValues(ast)
   let unreadable: { reason: string; message: string } | null = null
 
-  const redirects = extractRedirects(ast)
+  const redirects = extractRedirects(ast, known)
   debug("redirects", redirects)
 
   // Exfiltration domains, once more over the words with quotes removed and
@@ -267,7 +270,7 @@ export async function decide(
 
   // Pipe target inspection — genuine `curl | bash`, NOT `&&`/`||` chains.
   const PIPE_SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "eval"])
-  for (const name of extractPipeTargets(ast)) {
+  for (const name of extractPipeTargets(ast, known)) {
     if (PIPE_SHELLS.has(name)) {
       debug("pipe-target", { name })
       audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `pipe to ${name}`, layer: "pipe-target" })
@@ -380,7 +383,8 @@ export async function decide(
  * strictPlaceholders, the judgment call for a value nobody can read. Its
  * other judgment calls are dropped: a rule that allowed the command as
  * written read the variable on purpose (safe_scripts lists
- * `$HOME/.claude/...`, vars.ts resolves `$S` for rm).
+ * `$HOME/.claude/...`). A variable vars.ts knows is already its value in
+ * the words, with nothing left to vary.
  */
 function evaluateWithValues(cmdInfo: CommandInfo, values: PossibleValues, ctx: EvalContext, strictCtx: EvalContext): EvalResult {
   const variants = commandVariants(cmdInfo, values)

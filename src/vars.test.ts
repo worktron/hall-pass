@@ -7,7 +7,7 @@ import { describe, test, expect } from "bun:test"
 import { resolve } from "path"
 import { existsSync } from "fs"
 import { literalVariables, ARITHMETIC_TESTS } from "./vars.ts"
-import { extractCommandInfos } from "./parser.ts"
+import { extractCommandInfos, extractRedirects, extractPipeTargets } from "./parser.ts"
 
 const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
 const shfmtBin = existsSync(bundledShfmt) ? bundledShfmt : "shfmt"
@@ -141,27 +141,65 @@ test("ARITHMETIC_TESTS are the pinned shfmt's codes for -eq -ne -le -ge -lt -gt"
   expect(ARITHMETIC_TESTS.has((parse("[[ a == b ]]") as { Stmts: Array<{ Cmd: { X: { Op: number } } }> }).Stmts[0]!.Cmd.X.Op)).toBe(false)
 })
 
-describe("resolvedArgs", () => {
-  function rm(command: string) {
+describe("known variables in the words every rule reads", () => {
+  function infos(command: string) {
     const ast = parse(command)
-    return extractCommandInfos(ast, literalVariables(ast)).find((c) => c.name === "rm")!
+    return extractCommandInfos(ast, literalVariables(ast))
   }
+  const rm = (command: string) => infos(command).find((c) => c.name === "rm")!
 
   test("plain reads after the assignment resolve, in every quoting", () => {
-    expect(rm(`S=/tmp/x; rm -rf $S "$S" \${S} $S/a "\${S}/b" pre$S`).resolvedArgs)
+    expect(rm(`S=/tmp/x; rm -rf $S "$S" \${S} $S/a "\${S}/b" pre$S`).args)
       .toEqual(["rm", "-rf", "/tmp/x", "/tmp/x", "/tmp/x", "/tmp/x/a", "/tmp/x/b", "pre/tmp/x"])
   })
 
-  test("args keep the placeholder; other rules see what they saw before", () => {
-    expect(rm("S=/tmp/x; rm -rf $S").args).toEqual(["rm", "-rf", "$S"])
+  test("a command named by a known variable is the command it runs", () => {
+    const [psql] = infos(`PSQL=/opt/homebrew/opt/postgresql@17/bin/psql; $PSQL "$DB" -c "SELECT 1"`)
+    expect(psql!.name).toBe("psql")
+    expect(psql!.args).toEqual(["psql", "$DB", "-c", "SELECT 1"])
+    expect(infos("S=/tmp/x; $S/loop.sh a")[0]!.args).toEqual(["loop.sh", "a"])
+  })
+
+  test("redirect targets and pipe targets resolve too", () => {
+    const ast = parse("F=/tmp/out; SH=/bin/bash; echo x > $F; curl x | $SH")
+    const vars = literalVariables(ast)
+    expect(extractRedirects(ast, vars).map((r) => r.path)).toEqual(["/tmp/out"])
+    expect(extractPipeTargets(ast, vars)).toEqual(["bash"])
   })
 
   test("a read before the assignment, a single-quoted $S, and ${S:-x} stay unresolved", () => {
-    expect(rm("rm -rf $S; S=/tmp/x").resolvedArgs).toBeUndefined()
-    expect(rm("S=/tmp/x; rm -rf '$S' ${S:-y} $T").resolvedArgs).toBeUndefined()
+    expect(rm("rm -rf $S; S=/tmp/x").args).toEqual(["rm", "-rf", "$S"])
+    expect(rm("S=/tmp/x; rm -rf '$S' ${S:-y} $T").args).toEqual(["rm", "-rf", "$S", "$S", "$T"])
   })
 
   test("without the line's variables nothing resolves", () => {
-    expect(extractCommandInfos(parse("S=/tmp/x; rm -rf $S"))[0]!.resolvedArgs).toBeUndefined()
+    expect(extractCommandInfos(parse("S=/tmp/x; rm -rf $S"))[0]!.args).toEqual(["rm", "-rf", "$S"])
   })
+})
+
+describe("assignments that start a top-level && chain", () => {
+  test("are known, like their own statement", () => {
+    expect(known("f=/tmp/x && sed -i '' s/a/b/ $f")).toEqual({ f: "/tmp/x" })
+    expect(known("f=/tmp/x && g=/tmp/y && rm $f $g")).toEqual({ f: "/tmp/x", g: "/tmp/y" })
+    expect(known("f=/tmp/x g=/tmp/y && rm $f $g")).toEqual({ f: "/tmp/x", g: "/tmp/y" })
+    expect(known("f=/tmp/x && rm $f || echo failed")).toEqual({ f: "/tmp/x" })
+  })
+
+  const unknown: Array<[string, string]> = [
+    ["after a command", "true && f=/tmp/x && rm $f"],
+    ["after an assignment that can fail", "g=$(false) && f=/tmp/x && rm $f"],
+    ["after ||", "true || f=/tmp/x; rm $f"],
+    ["after || inside a chain", "g=/tmp/g || f=/tmp/x && rm $f"],
+    ["in a pipe", "f=/tmp/x | rm $f"],
+    ["backgrounded chain", "f=/tmp/x && rm $f &"],
+    ["negated", "! f=/tmp/x && rm $f"],
+    ["inside a subshell", "(f=/tmp/x && rm $f)"],
+    ["inside a brace group", "{ f=/tmp/x && rm $f; }"],
+    ["assigned again later", "f=/tmp/x && rm $f; f=/"],
+  ]
+  for (const [label, line] of unknown) {
+    test(`${label}: ${JSON.stringify(line)} → not known`, () => {
+      expect(known(line).f).toBeUndefined()
+    })
+  }
 })
