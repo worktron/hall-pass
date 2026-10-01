@@ -29,6 +29,8 @@ describe("literalVariables", () => {
     expect(known("A=/tmp/a B=/tmp/b\nrm $A $B")).toEqual({ A: "/tmp/a", B: "/tmp/b" })
     expect(known("S=/tmp/x; printf '%s\\n' Saved; rm -rf $S")).toEqual({ S: "/tmp/x" })
     expect(known(`S=/tmp/x; [[ -d $S ]] && echo "\${a[0]}" "\${a[@]}"; export PATH=$PATH:/x; rm -rf $S`)).toEqual({ S: "/tmp/x" })
+    // Quoted, or not an expansion at all: the command is named as written.
+    expect(known(`S=/tmp/x; [ -d $S ] && 'ev?l' && "{a,b}" && ec{ho x; rm -rf $S`)).toEqual({ S: "/tmp/x" })
   })
 
   const unknown: Array<[string, string]> = [
@@ -95,6 +97,13 @@ describe("literalVariables", () => {
     ["alias", "S=/tmp/x; alias rm='S=/ rm'"],
     ["command eval", "S=/tmp/x; command eval true"],
     ["an expanded command name", "S=/tmp/x; $CMD true"],
+    ["a brace-expanded command name", "S=/tmp/x; {eval,S=/}"],
+    ["a brace with a quoted part", "S=/tmp/x; {eval,'S=/'}"],
+    ["a sequence brace", "S=/tmp/x; {a..b}"],
+    ["a globbed command name", "S=/tmp/x; ev?l S=/"],
+    ["a bracket glob", "S=/tmp/x; [e]val S=/"],
+    ["a star glob", "S=/tmp/x; e*l S=/"],
+    ["a brace behind command", "S=/tmp/x; command {eval,S=/}"],
     ["IFS assigned", "IFS=/; S=/tmp/x"],
     ["IFS read", "S=/tmp/x; read -r IFS"],
     ["PWD", "PWD=/tmp/x"],

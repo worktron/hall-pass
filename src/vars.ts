@@ -227,7 +227,9 @@ export function scanWriters(ast: unknown): WriterScan {
 
 /**
  * The builtin a CallExpr runs, looking through `command` and `builtin`.
- * Null when the name is itself an expansion (`$X …` could be `eval`).
+ * Null when the name is itself an expansion (`$X …` could be `eval`), or
+ * literal text the shell expands into other words (`{eval,S=/}` runs
+ * `eval S=/`; `ev?l` can match a file named eval).
  * A bare assignment has no name, and runs nothing: "".
  */
 function commandName(call: Node): string | null {
@@ -235,7 +237,7 @@ function commandName(call: Node): string | null {
   let i = 0
   while (i < words.length) {
     const text = literalText(words[i]!)
-    if (text === null) return null
+    if (text === null || NAME_EXPANSION.test(unquotedText(words[i]!))) return null
     if (text !== "command" && text !== "builtin") return text
     i++
     while (i < words.length && literalText(words[i]!)?.startsWith("-")) i++
@@ -246,6 +248,14 @@ function commandName(call: Node): string | null {
 /** `printf -v NAME` or `printf -vNAME`: printf stores its output in a variable. */
 function writesWithV(call: Node): boolean {
   return ((call.Args as Node[] | undefined) ?? []).some((w) => literalText(w)?.startsWith("-v") ?? true)
+}
+
+/** Brace expansion (`{a,b}`, `{1..3}`) and globs (`*`, `?`, `[...]`) in a word's unquoted text. */
+const NAME_EXPANSION = /[*?]|\[.*\]|\{.*(,|\.\.).*\}/
+
+/** A word's unquoted literal text, with each quoted part reduced to one inert character. */
+function unquotedText(word: Node): string {
+  return ((word.Parts as Node[] | undefined) ?? []).map((p) => (p.Type === "Lit" ? String(p.Value ?? "") : "_")).join("")
 }
 
 /** The text of a Word made only of literal parts, or null if the shell would expand any of it. */
