@@ -18,8 +18,8 @@ export interface HallPassConfig {
   audit: { enabled: boolean; path: string };
   debug: { enabled: boolean };
   /**
-   * defer: in permission modes where Claude Code has its own reviewer (auto
-   * mode's classifier), hand judgment-call prompts to it instead of forcing
+   * defer: in permission modes where Claude Code has its own reviewer (the
+   * classifier, in auto and plan mode), hand judgment-call prompts to it instead of forcing
    * the user to answer. Hard stops (protected paths, secrets, code injection,
    * pushes to protected branches) prompt regardless. See decide.ts.
    */
@@ -254,7 +254,7 @@ export function generateDefaultConfig(): string {
 # path = "~/.config/hall-pass/audit.jsonl"
 
 [classifier]
-# In auto mode (and bypassPermissions), judgment-call prompts — rm, sudo,
+# In auto and plan mode (and bypassPermissions), judgment-call prompts — rm, sudo,
 # ssh, inline perl/python, in-place sed, database writes, unknown git
 # subcommands — are handed to Claude Code's own classifier instead of
 # forcing a prompt (a hook "ask" prompts in EVERY mode). Hard stops still
