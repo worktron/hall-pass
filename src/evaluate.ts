@@ -38,7 +38,11 @@ export type EvalResult =
    * own reviewer (auto mode's classifier) decide.ts hands it over instead of
    * forcing the user to answer — see DEFER_MODES there.
    */
-  | { decision: "prompt"; reason: string; message: string; hard?: boolean }
+  /**
+   * `unreadable` marks the judgment call strictPlaceholders adds: a protected
+   * check met a value nobody can read.
+   */
+  | { decision: "prompt"; reason: string; message: string; hard?: boolean; unreadable?: boolean }
   | { decision: "pass"; reason: string }
   | { decision: "feedback"; suggestion: string }
 
@@ -131,6 +135,7 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
       decision: "prompt",
       reason: `path-unknown: ${name} ${unknownPath}`,
       message: `"${name}" uses a path held in a variable hall-pass cannot read (${unknownPath})`,
+      unreadable: true,
     }
   }
   return result

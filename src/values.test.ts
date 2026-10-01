@@ -40,9 +40,13 @@ describe("possibleValues", () => {
     expect(substitute("$V/out", v)).toEqual(["/tmp/s/verify/out"])
   })
 
-  test("a self-reference stops expanding and stays unknown", async () => {
-    const v = await valuesOf("P=/a; P=$P/b")
-    expect(v.get("P")).toEqual(["/a", "$P/b"])
+  test("a self-reference takes the name's other values", async () => {
+    expect((await valuesOf("P=/a; P=$P/b")).get("P")).toEqual(["/a", "/a/b"])
+    expect((await valuesOf("S=/tmp/s && mkdir -p $S && S=$S bun x.ts")).get("S")).toEqual(["/tmp/s"])
+  })
+
+  test("a self-reference with nothing else stays unknown", async () => {
+    expect((await valuesOf("P=$P/b")).get("P")).toEqual(["$P/b"])
   })
 
   test("for-loop items are values; a loop over command output is unknown", async () => {

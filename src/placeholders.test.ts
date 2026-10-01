@@ -224,9 +224,19 @@ describe("a variable set on the line decides like the value typed out", () => {
     })
   }
 
+  test("a substituted value adds no judgment call a rule already settled", async () => {
+    // safe_scripts lists the script by its $HOME spelling; the typed-out
+    // absolute path is not listed, and that must not bring back the prompt.
+    const base = await getConfig()
+    const config = { ...base, commands: { ...base.commands, safe_scripts: ["$HOME/bin/push.sh"] } }
+    const d = await decide("Bash", { command: 'bash "$HOME/bin/push.sh" staging' }, { config, shfmtBin, debug: () => {}, audit: { log() {}, event() {} }, mode: "default", cwd: repo })
+    expect(d).toEqual({ decision: "allow", reason: "all commands safe" })
+  })
+
   test("a guessed value never turns a prompt into an allow", async () => {
-    // rm on a variable keeps its prompt even though the only value is a scratch path.
-    expect((await judge(`S=${scratch}/a; rm -rf $S`, "default")).decision).toBe("ask")
+    // Set twice, so vars.ts cannot say what $S is at the rm; both guesses are
+    // scratch paths, and the rm still prompts.
+    expect((await judge(`S=${scratch}/a; S=${scratch}/b; rm -rf $S`, "default")).decision).toBe("ask")
   })
 })
 

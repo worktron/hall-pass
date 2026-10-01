@@ -30,6 +30,9 @@ const MAX_DEPTH = 4
 
 const NAME_TOKEN = /\$([A-Za-z_][A-Za-z0-9_]*)/g
 
+/** Stands for "a value the line cannot pin down" while values are collected; rendered as `$NAME`. */
+const UNKNOWN = "\0unknown"
+
 /** Parameter-expansion operators whose word is a value the expansion can produce. */
 const VALUE_OPS: ReadonlySet<number> = new Set([
   PARAM_OP.alt, PARAM_OP.colAlt, PARAM_OP.def, PARAM_OP.colDef, PARAM_OP.assign, PARAM_OP.colAssign,
@@ -51,7 +54,7 @@ export function possibleValues(ast: unknown, env: { home?: string; tmpdir?: stri
     if (!list.includes(value)) list.push(value)
     raw.set(name, list)
   }
-  const unknown = (name: string | undefined) => { if (name) add(name, `$${name}`) }
+  const unknown = (name: string | undefined) => { if (name) add(name, UNKNOWN) }
 
   const home = env.home ?? homedir()
   const tmpdir = env.tmpdir ?? process.env.TMPDIR
@@ -105,7 +108,8 @@ export function possibleValues(ast: unknown, env: { home?: string; tmpdir?: stri
   for (const [name, values] of raw) {
     const out: string[] = []
     for (const v of values) {
-      for (const e of expand(v, raw, MAX_DEPTH, new Set([name]))) if (!out.includes(e)) out.push(e)
+      const expanded = v === UNKNOWN ? [`$${name}`] : expand(v, raw, MAX_DEPTH, new Set([name]))
+      for (const e of expanded) if (!out.includes(e)) out.push(e)
     }
     resolved.set(name, out.slice(0, MAX_VARIANTS))
   }
@@ -126,14 +130,21 @@ export function hasPlaceholder(word: string): boolean {
   return word.includes("$")
 }
 
+/**
+ * A value with the variables it mentions expanded. A reference back to a
+ * name being expanded (`P=$P/b`, `X=$X cmd`) takes that name's other values,
+ * the ones that do not mention it; with none, it stays unknown.
+ */
 function expand(value: string, raw: Map<string, string[]>, depth: number, seen: Set<string>): string[] {
   if (depth === 0) return [value]
   return expandWith(value, (name) => {
-    if (seen.has(name)) return undefined
     const list = raw.get(name)
     if (!list) return undefined
+    const own = new RegExp(`\\$${name}(?![A-Za-z0-9_])`)
+    const usable = seen.has(name) ? list.filter((v) => !own.test(v)) : list
+    if (usable.length === 0) return undefined
     const next = new Set(seen).add(name)
-    return list.flatMap((v) => expand(v, raw, depth - 1, next))
+    return usable.flatMap((v) => (v === UNKNOWN ? [`$${name}`] : expand(v, raw, depth - 1, next)))
   })
 }
 

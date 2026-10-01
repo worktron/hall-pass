@@ -23,7 +23,7 @@ import { gitTopLevel, gitRemoteUrl, isLocalRemoteUrl, isScratchDir, readWorktree
 export type GitDecision =
   | { safe: true }
   /** `hard`: prompts in every permission mode (see EvalResult in evaluate.ts). */
-  | { safe: false; reason: string; message: string; hard?: boolean }
+  | { safe: false; reason: string; message: string; hard?: boolean; unreadable?: boolean }
 
 /** Where the git command runs. `cwd` is the hook's working directory. */
 export interface GitRepo {
@@ -263,6 +263,8 @@ function pushStaysLocal(remote: string | undefined, flags: string[], location: R
 const safe: GitDecision = { safe: true }
 const unsafe = (reason: string, message: string): GitDecision => ({ safe: false, reason, message })
 const hardUnsafe = (reason: string, message: string): GitDecision => ({ safe: false, reason, message, hard: true })
+/** A judgment call: a value the check needs is held in a variable nobody can read (`strict`). */
+const unreadable = (reason: string, message: string): GitDecision => ({ safe: false, reason, message, unreadable: true })
 
 export function checkGitCommand(
   argsOrCommand: string[] | string,
@@ -295,7 +297,7 @@ export function checkGitCommand(
     const key = (eq === -1 ? config : config.slice(0, eq)).toLowerCase()
     const value = eq === -1 ? "" : config.slice(eq + 1)
     if (strict && key.includes("$")) {
-      return unsafe(`git: -c config key in a variable`, `git -c sets a config key held in a variable hall-pass cannot read (${key})`)
+      return unreadable("git: -c config key in a variable", `git -c sets a config key held in a variable hall-pass cannot read (${key})`)
     }
     for (const dangerous of DANGEROUS_GIT_CONFIGS) {
       if (key.startsWith(dangerous.toLowerCase())) {
@@ -333,7 +335,7 @@ export function checkGitCommand(
       const key = positional[0]!.toLowerCase()
       const value = positional[1]!
       if (strict && key.includes("$")) {
-        return unsafe("git: config key in a variable", `git config writes a key held in a variable hall-pass cannot read (${positional[0]})`)
+        return unreadable("git: config key in a variable", `git config writes a key held in a variable hall-pass cannot read (${positional[0]})`)
       }
       for (const dangerous of DANGEROUS_GIT_CONFIGS) {
         if (key.startsWith(dangerous.toLowerCase())) {
@@ -427,7 +429,7 @@ export function checkGitCommand(
       if (strict && subcommand === "push" && i >= 1 && target.includes("$")) unknownTarget ??= arg
     }
     if (unknownTarget && !pushStaysLocal(rest[0], flags, location)) {
-      return unsafe("git: push target in a variable", `git push to a branch held in a variable hall-pass cannot read (${unknownTarget})`)
+      return unreadable("git: push target in a variable", `git push to a branch held in a variable hall-pass cannot read (${unknownTarget})`)
     }
     return safe
   }

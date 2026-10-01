@@ -375,10 +375,12 @@ export async function decide(
 /**
  * One command, judged as written and with each value its variables could
  * hold (values.ts). The command as written is judged by today's rules, so a
- * guessed value can never talk a rule into an allow; a variant can only add
- * a prompt, the one its typed-out form would get. Variants are judged under
- * strictPlaceholders, where a `$` still left in a protected spot is a value
- * nobody can read.
+ * guessed value can never talk a rule into an allow. A variant can only add
+ * a protected stop (the hard prompt its typed-out form gets) or, judged under
+ * strictPlaceholders, the judgment call for a value nobody can read. Its
+ * other judgment calls are dropped: a rule that allowed the command as
+ * written read the variable on purpose (safe_scripts lists
+ * `$HOME/.claude/...`, vars.ts resolves `$S` for rm).
  */
 function evaluateWithValues(cmdInfo: CommandInfo, values: PossibleValues, ctx: EvalContext, strictCtx: EvalContext): EvalResult {
   const variants = commandVariants(cmdInfo, values)
@@ -391,7 +393,7 @@ function evaluateWithValues(cmdInfo: CommandInfo, values: PossibleValues, ctx: E
     const result = strictCtx.evaluate(variant)
     if (result.decision !== "prompt") continue
     if (result.hard) return result
-    judgment ??= result
+    if (result.unreadable) judgment ??= result
   }
   return judgment ?? asWritten
 }
