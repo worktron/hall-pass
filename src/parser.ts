@@ -6,6 +6,8 @@
  * chains (&&/||), loops, conditionals, subshells, and command substitutions.
  */
 
+import { resolveRead, type LiteralVars } from "./vars.ts"
+
 /**
  * The operator codes shfmt --tojson emits, for the shfmt install.ts pins
  * (bin/shfmt, v3.13.0). shfmt renumbers them between minor versions: v3.12
@@ -69,6 +71,13 @@ export interface CommandInfo {
    * arrives on stdin, from `python3 report.py`, where stdin is only data.
    */
   stdinFromPipe?: boolean
+  /**
+   * `args` with each plain read of a variable the line itself set to a
+   * literal path replaced by that path (see vars.ts); every other expansion
+   * keeps its placeholder. Present only when the caller passed the line's
+   * variables and something resolved. Only rules that opt in read it.
+   */
+  resolvedArgs?: string[]
 }
 
 export interface RedirectInfo {
@@ -95,7 +104,7 @@ export function extractCommands(node: unknown): string[] {
 /**
  * Extract full command info including arguments.
  */
-export function extractCommandInfos(node: unknown): CommandInfo[] {
+export function extractCommandInfos(node: unknown, vars?: LiteralVars): CommandInfo[] {
   if (!node || typeof node !== "object") return []
 
   const n = node as Record<string, unknown>
@@ -106,13 +115,13 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
   // can be attached; walking them independently would lose the association.
   if (Array.isArray(n.Redirs) && n.Cmd) {
     const stdin = extractHeredocText(n.Redirs as Array<Record<string, unknown>>)
-    const inner = extractCommandInfos(n.Cmd)
+    const inner = extractCommandInfos(n.Cmd, vars)
     // Leftmost command owns the redirect: in `psql <<EOF | head`, the
     // heredoc feeds psql, not head.
     if (stdin !== null && inner.length > 0) inner[0]!.stdin = stdin
     commands.push(...inner)
     // Redirect targets can themselves contain command substitutions.
-    for (const redir of n.Redirs) commands.push(...extractCommandInfos(redir))
+    for (const redir of n.Redirs) commands.push(...extractCommandInfos(redir, vars))
     return commands
   }
 
@@ -120,22 +129,28 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
   // from the left. Pipes nest left-associatively, so `a | b | c` is
   // BinaryCmd(a|b, c) and each level marks its own right-hand command.
   if (n.Type === "BinaryCmd" && (n.Op === BINARY.pipe || n.Op === BINARY.pipeAll)) {
-    const left = extractCommandInfos(n.X)
-    const right = extractCommandInfos(n.Y)
+    const left = extractCommandInfos(n.X, vars)
+    const right = extractCommandInfos(n.Y, vars)
     if (right.length > 0) right[0]!.stdinFromPipe = true
     return [...left, ...right]
   }
 
   // CallExpr = a command invocation
   if (n.Type === "CallExpr" && Array.isArray(n.Args) && n.Args.length > 0) {
-    const args = (n.Args as Array<Record<string, unknown>>).map(extractWordValue).filter(Boolean) as string[]
+    const words = (n.Args as Array<Record<string, unknown>>).filter((w) => extractWordValue(w))
+    const args = words.map((w) => extractWordValue(w)!)
     if (args.length > 0) {
       const name = args[0]!.split("/").pop()!
-      commands.push({
+      const info: CommandInfo = {
         name,
         args: [name, ...args.slice(1)],
         assigns: extractAssigns(n),
-      })
+      }
+      if (vars && vars.size > 0) {
+        const resolved = words.slice(1).map((w) => extractWordValue(w, vars)!)
+        if (resolved.some((r, i) => r !== args[i + 1])) info.resolvedArgs = [name, ...resolved]
+      }
+      commands.push(info)
     }
   }
 
@@ -143,10 +158,10 @@ export function extractCommandInfos(node: unknown): CommandInfo[] {
   for (const value of Object.values(n)) {
     if (Array.isArray(value)) {
       for (const item of value) {
-        commands.push(...extractCommandInfos(item))
+        commands.push(...extractCommandInfos(item, vars))
       }
     } else if (typeof value === "object" && value !== null) {
-      commands.push(...extractCommandInfos(value))
+      commands.push(...extractCommandInfos(value, vars))
     }
   }
 
@@ -336,25 +351,30 @@ function extractAssigns(node: Record<string, unknown>): AssignInfo[] {
  * Keeping the slot keeps the shape, and `$CL` cannot match a protected path
  * glob or a protected branch name, so a placeholder never makes a command
  * look safer than an unknown value should.
+ *
+ * With `vars`, a plain read of a variable the line set to a literal path
+ * renders as that path instead (resolveRead decides).
  */
-function extractWordValue(word: Record<string, unknown>): string | null {
+function extractWordValue(word: Record<string, unknown>, vars?: LiteralVars): string | null {
   const parts = word?.Parts as Array<Record<string, unknown>> | undefined
   if (!parts) return null
 
   let result = ""
-  for (const part of parts) result += partText(part)
+  for (const part of parts) result += partText(part, vars)
   return result || null
 }
 
-function partText(part: Record<string, unknown>): string {
+function partText(part: Record<string, unknown>, vars?: LiteralVars): string {
   if (part.Value !== undefined) return String(part.Value)
   switch (part.Type) {
     case "DblQuoted":
     case "SglQuoted": {
       const inner = part.Parts as Array<Record<string, unknown>> | undefined
-      return inner ? inner.map(partText).join("") : ""
+      return inner ? inner.map((p) => partText(p, vars)).join("") : ""
     }
     case "ParamExp": {
+      const value = vars ? resolveRead(part, vars) : null
+      if (value !== null) return value
       const name = (part.Param as Record<string, unknown> | undefined)?.Value
       return name !== undefined ? `$${String(name)}` : "${...}"
     }

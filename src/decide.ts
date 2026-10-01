@@ -18,6 +18,7 @@ import type { AuditLogger } from "./audit.ts"
 import { checkFilePath } from "./paths.ts"
 import { checkFeedbackRules } from "./feedback.ts"
 import { createEvalContext } from "./evaluate.ts"
+import { literalVariables } from "./vars.ts"
 import { detectSecret } from "./secrets.ts"
 import { detectExfilDomain } from "./network.ts"
 import { parseApplyPatch, checkPatch } from "./patch.ts"
@@ -222,7 +223,7 @@ export async function decide(
 
   // -- Extract commands and AST-level data --
 
-  const commandInfos = extractCommandInfos(ast)
+  const commandInfos = extractCommandInfos(ast, literalVariables(ast))
   debug("commands", commandInfos.map((c) => c.name))
 
   // Pipe target inspection — genuine `curl | bash`, NOT `&&`/`||` chains.

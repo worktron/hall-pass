@@ -174,12 +174,15 @@ function climbsOut(path: string): boolean {
  * nothing. `$TMPDIR/x` is read with the hook's own TMPDIR, since the
  * command's shell inherits the same one. A bare `rm -rf`, a root itself
  * (`rm -rf /tmp`), a glob, any other variable, a relative path with no cwd,
- * or a target anywhere else keeps the dangerous-command prompt.
+ * or a target anywhere else keeps the dangerous-command prompt. A variable
+ * the line itself set to a literal path (`S=/tmp/x; rm -rf $S`) is read as
+ * that path: resolvedArgs, which vars.ts fills only when nothing else on the
+ * line can change it.
  */
 function throwawayRm(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult | null {
   const targets: string[] = []
   let optionsDone = false
-  for (const arg of cmdInfo.args.slice(1)) {
+  for (const arg of (cmdInfo.resolvedArgs ?? cmdInfo.args).slice(1)) {
     if (!optionsDone && arg === "--") { optionsDone = true; continue }
     if (!optionsDone && arg.startsWith("-") && arg !== "-") continue
     targets.push(arg)

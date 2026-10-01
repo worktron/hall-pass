@@ -162,6 +162,87 @@ describe("rm judged by its targets", () => {
   })
 })
 
+describe("rm reads a variable the same line set", () => {
+  const S = "/private/tmp/claude-501/-Users-me-proj/7a8c79ec/scratchpad/mt2"
+  const ALLOW = { decision: "allow", reason: "all commands safe" } as const
+  const ASK = { decision: "ask", reason: "dangerous: rm", message: `"rm" is a destructive command` } as const
+
+  const allows: string[] = [
+    `S=${S}; rm -rf $S; mkdir -p $S`,
+    `S=${S}; rm -rf "$S"`,
+    `S=${S}; rm -rf \${S}`,
+    `S=${S}; rm -rf $S/sub/path "\${S}/other"`,
+    `S='${S}'; rm -rf "$S"`,
+    `S=${S}\nrm -rf $S`,
+    `S=${S}; timeout 5 rm -rf $S`,
+    `S=${S}; if [ -d $S ]; then rm -rf $S; fi`,
+    `S=${S}; for i in 1 2; do rm -rf $S; done`,
+    `A=/tmp/a B=${S}; rm -rf $A $B`,
+  ]
+  for (const line of allows) {
+    test(`${JSON.stringify(line)} → allow`, async () => {
+      expect(await judgeLine(line, repo)).toEqual(ALLOW)
+    })
+  }
+
+  const asks: Array<[string, string]> = [
+    ["reassigned later", `S=${S}; S=/Users/me; rm -rf $S`],
+    ["reassigned after the rm", `S=${S}; rm -rf $S; S=/Users/me`],
+    ["assigned in an && chain", `true && S=${S}; rm -rf $S`],
+    ["assigned in an || chain", `S=${S} || S=/Users/me; rm -rf $S`],
+    ["assigned only in an if", `if true; then S=${S}; fi; rm -rf $S`],
+    ["also assigned in an if", `S=${S}; if true; then S=/Users/me; fi; rm -rf $S`],
+    ["also assigned in a subshell", `S=${S}; (S=/Users/me); rm -rf $S`],
+    ["also assigned in a function", `S=${S}; f() { S=/Users/me; }; f; rm -rf $S`],
+    ["local in a function", `S=${S}; f() { local S=/Users/me; rm -rf $S; }; f`],
+    ["prefix-assigned on the rm", `S=${S} rm -rf $S`],
+    ["prefix-assigned on another command", `S=${S} true; rm -rf $S`],
+    ["also prefix-assigned elsewhere", `S=${S}; S=/Users/me env; rm -rf $S`],
+    ["read before it is assigned", `rm -rf $S; S=${S}`],
+    ["a function body written before the assignment", `f() { rm -rf $S; }; S=${S}; f`],
+    ["non-scratch value", `S=/Users/me/work; rm -rf $S`],
+    ["the scratch root itself", `S=/tmp; rm -rf $S`],
+    ["value with an expansion", `S=$HOME/x; rm -rf $S`],
+    ["value with a command substitution", `S=$(mktemp -d); rm -rf $S`],
+    ["relative value", `S=build; rm -rf $S`],
+    ["tilde value", `S=~/x; rm -rf $S`],
+    ["value with a space", `S="/tmp/a b"; rm -rf $S`],
+    ["value with a glob", `S='/tmp/*'; rm -rf $S`],
+    ["empty value", `S=; rm -rf $S/`],
+    ["value that climbs out", `S=/tmp/../Users/me; rm -rf $S`],
+    ["appended to", `S=${S}; S+=/../../..; rm -rf $S`],
+    ["backgrounded assignment", `S=${S} & rm -rf $S`],
+    ["\${S:-x} default", `S=${S}; rm -rf \${S:-/Users/me}`],
+    ["\${S:=x} assigns", `S=${S}; echo \${S:=/Users/me}; rm -rf $S`],
+    ["single-quoted $S is literal text", `S=${S}; rm -rf '$S'`],
+    ["for S in", `S=${S}; for S in /Users/me; do :; done; rm -rf $S`],
+    ["read S", `S=${S}; read S < /dev/null; rm -rf $S`],
+    ["printf -v S", `S=${S}; printf -v S /Users/me; rm -rf $S`],
+    ["printf -vS", `S=${S}; printf -vS /Users/me; rm -rf $S`],
+    ["export S=", `S=${S}; export S=/Users/me; rm -rf $S`],
+    ["declare -n nameref", `S=${S}; declare -n r=S; r=/Users/me; rm -rf $S`],
+    ["unset S", `S=${S}; unset S; rm -rf $S/x`],
+    ["arithmetic assignment", `S=${S}; ((S=1)); rm -rf $S`],
+    ["let", `S=${S}; let S=1; rm -rf $S`],
+    ["[[ arithmetic ]] assignment", `S=${S}; [[ 1 -eq S=1 ]]; rm -rf $S`],
+    ["eval anywhere", `S=${S}; eval "$X"; rm -rf $S`],
+    ["trap anywhere", `S=${S}; trap 'S=/Users/me' DEBUG; rm -rf $S`],
+    ["command eval", `S=${S}; command eval "$X"; rm -rf $S`],
+    ["PWD reassigned, then cd", `PWD=${S}; cd /Users/me; rm -rf $PWD`],
+    ["IFS reassigned", `IFS=/; S=${S}; rm -rf $S`],
+    ["one target resolves, another does not", `S=${S}; rm -rf $S $T`],
+  ]
+  for (const [label, line] of asks) {
+    test(`${label}: ${JSON.stringify(line)} → prompt`, async () => {
+      expect(await judgeLine(line, repo)).toEqual(ASK)
+    })
+  }
+
+  test("a variable rm resolves stays a placeholder for every other rule", () => {
+    expect(judge(cmd("rm", "-rf", "$S"), repo).decision).toBe("prompt")
+  })
+})
+
 describe("a shell judged by the repository script it runs", () => {
   test("bash scripts/ship-gates.sh inside a repository that tracks it → allow", () => {
     expect(judge(cmd("bash", "scripts/ship-gates.sh"), repo)).toEqual({ decision: "allow", reason: "bash: repository script scripts/ship-gates.sh" })
