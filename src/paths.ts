@@ -13,6 +13,12 @@ import type { CommandInfo } from "./parser.ts"
 export interface PathDecision {
   allowed: boolean
   reason: string
+  /**
+   * Set (with allowed true) when an argument holds a value the line does not
+   * pin down, so no rule can say whether it is protected. Only reported when
+   * the caller asks for it (checkCommandPaths' `strict`).
+   */
+  unknown?: string
 }
 
 /** Commands that only read files. */
@@ -111,18 +117,21 @@ function getOperationType(commandName: string): "read" | "write" | "delete" {
 export function checkCommandPaths(
   commandInfo: CommandInfo,
   config: HallPassConfig,
+  strict = false,
 ): PathDecision {
   const operation = getOperationType(commandInfo.name)
   // args[0] is the command name itself, skip it
   const args = commandInfo.args.slice(1)
+  let unknown: string | undefined
 
   for (const arg of args) {
     if (arg.startsWith("-")) continue // skip flags
+    if (strict && arg.includes("$")) unknown ??= arg
     if (!looksLikePath(arg)) continue
 
     const decision = checkFilePath(arg, operation, config)
     if (!decision.allowed) return decision
   }
 
-  return { allowed: true, reason: "" }
+  return unknown ? { allowed: true, reason: "", unknown } : { allowed: true, reason: "" }
 }

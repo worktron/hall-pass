@@ -269,6 +269,12 @@ export function checkGitCommand(
   customProtectedBranches?: Set<string>,
   customSafeSubcommands?: Set<string>,
   repo?: GitRepo,
+  /**
+   * The args have had every value the line pins down substituted in, so a
+   * `$` left in a config key or a push target is a value nobody can read:
+   * a judgment call rather than a pass (see EvalContext.strictPlaceholders).
+   */
+  strict = false,
 ): GitDecision {
   const args = typeof argsOrCommand === "string"
     ? tokenize(argsOrCommand)
@@ -288,6 +294,9 @@ export function checkGitCommand(
     const eq = config.indexOf("=")
     const key = (eq === -1 ? config : config.slice(0, eq)).toLowerCase()
     const value = eq === -1 ? "" : config.slice(eq + 1)
+    if (strict && key.includes("$")) {
+      return unsafe(`git: -c config key in a variable`, `git -c sets a config key held in a variable hall-pass cannot read (${key})`)
+    }
     for (const dangerous of DANGEROUS_GIT_CONFIGS) {
       if (key.startsWith(dangerous.toLowerCase())) {
         if (key === "core.hookspath") {
@@ -323,6 +332,9 @@ export function checkGitCommand(
     if (positional.length >= 2) {
       const key = positional[0]!.toLowerCase()
       const value = positional[1]!
+      if (strict && key.includes("$")) {
+        return unsafe("git: config key in a variable", `git config writes a key held in a variable hall-pass cannot read (${positional[0]})`)
+      }
       for (const dangerous of DANGEROUS_GIT_CONFIGS) {
         if (key.startsWith(dangerous.toLowerCase())) {
           if (key === "core.hookspath") {
@@ -403,12 +415,19 @@ export function checkGitCommand(
   if (BRANCH_GATED_SUBCOMMANDS.has(subcommand)) {
     const branches = customProtectedBranches ?? PROTECTED_BRANCHES
     const flag = subcommand === "push" ? hardUnsafe : unsafe
+    let unknownTarget: string | undefined
     for (const [i, arg] of rest.entries()) {
       const target = arg.includes(":") ? arg.split(":").pop()! : arg
       if (branches.has(target)) {
         if (subcommand === "push" && pushStaysLocal(i >= 1 ? rest[0] : undefined, flags, location)) return safe
         return flag(`git: ${subcommand} to protected branch ${target}`, `git ${subcommand} to protected branch "${target}"`)
       }
+      // rest[0] is the remote; a refspec whose destination is a variable
+      // nobody can read might be main.
+      if (strict && subcommand === "push" && i >= 1 && target.includes("$")) unknownTarget ??= arg
+    }
+    if (unknownTarget && !pushStaysLocal(rest[0], flags, location)) {
+      return unsafe("git: push target in a variable", `git push to a branch held in a variable hall-pass cannot read (${unknownTarget})`)
     }
     return safe
   }

@@ -24,7 +24,7 @@ export const INSPECTORS: Record<string, Inspector> = {
   // -- Version control --
 
   git: (cmdInfo, ctx) => {
-    const decision = checkGitCommand(cmdInfo.args, ctx.protectedBranches, ctx.safeSubcommands, { cwd: ctx.cwd })
+    const decision = checkGitCommand(cmdInfo.args, ctx.protectedBranches, ctx.safeSubcommands, { cwd: ctx.cwd }, ctx.strictPlaceholders)
     if (decision.safe) return allow("git: safe")
     return { decision: "prompt", reason: decision.reason, message: decision.message, hard: decision.hard }
   },

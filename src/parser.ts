@@ -36,6 +36,20 @@ export const WRITE_OPS: ReadonlySet<number> = new Set([
   REDIR.out, REDIR.append, REDIR.readWrite, REDIR.clobber, REDIR.allOut, REDIR.allAppend,
 ])
 
+/**
+ * Parameter-expansion operators (`${X:-v}` and kin), from the same pinned
+ * shfmt. values.ts reads the word of these as a value `$X` can produce;
+ * values.test.ts checks each against the bundled binary.
+ */
+export const PARAM_OP = {
+  alt: 81, // ${X+v}
+  colAlt: 82, // ${X:+v}
+  def: 83, // ${X-v}
+  colDef: 84, // ${X:-v}
+  assign: 87, // ${X=v}
+  colAssign: 88, // ${X:=v}
+} as const
+
 export const BINARY = {
   and: 11, // &&
   or: 12, // ||
@@ -85,6 +99,11 @@ export interface RedirectInfo {
   path: string
   /** Whether this is a write (>, >>) or read (<) redirect */
   op: "write" | "read"
+  /**
+   * Set when the word is not a file path: the delimiter of a heredoc, the
+   * text of a herestring (`<<<"$X"`), or a file descriptor (`2>&1`, `>&-`).
+   */
+  kind?: "heredoc" | "fd"
 }
 
 export interface AssignInfo {
@@ -245,7 +264,10 @@ export function extractRedirects(node: unknown): RedirectInfo[] {
       // stays read and the path check skips it (the "path" is a numeric FD).
       const op = redir.Op as number | undefined
       const isWrite = op !== undefined && WRITE_OPS.has(op)
-      results.push({ path, op: isWrite ? "write" : "read" })
+      const info: RedirectInfo = { path, op: isWrite ? "write" : "read" }
+      if (op === REDIR.hdoc || op === REDIR.dashHdoc || op === REDIR.wordHdoc) info.kind = "heredoc"
+      else if ((op === REDIR.dupIn || op === REDIR.dupOut) && /^(\d+-?|-)$/.test(path)) info.kind = "fd"
+      results.push(info)
     }
   }
 
@@ -355,7 +377,7 @@ function extractAssigns(node: Record<string, unknown>): AssignInfo[] {
  * With `vars`, a plain read of a variable the line set to a literal path
  * renders as that path instead (resolveRead decides).
  */
-function extractWordValue(word: Record<string, unknown>, vars?: LiteralVars): string | null {
+export function extractWordValue(word: Record<string, unknown>, vars?: LiteralVars): string | null {
   const parts = word?.Parts as Array<Record<string, unknown>> | undefined
   if (!parts) return null
 
