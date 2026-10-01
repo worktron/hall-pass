@@ -76,11 +76,11 @@ const PLAIN_CD_OPTIONS = /^-[LPe@]+$/
  * The directory a command moves to: undefined when it does not change
  * directory, null when it does and the place cannot be named (a variable,
  * a relative path, `-`, a bare `cd`, `popd`, `pushd +1`, `cd old new`).
- * A variable the line set to a literal path reads as that path (resolvedArgs).
+ * A variable the line set to a literal path arrives as that path (vars.ts).
  */
 function dirChange(raw: CommandInfo): string | null | undefined {
   const cmd = unwrapCommand(raw)
-  let args = cmd.resolvedArgs ?? cmd.args
+  let args = cmd.args
   // `builtin cd`, `command cd`
   while (args[0] === "builtin" || args[0] === "command") {
     let i = 1
