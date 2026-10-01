@@ -228,6 +228,8 @@ describe("rm reads a variable the same line set", () => {
     ["eval anywhere", `S=${S}; eval "$X"; rm -rf $S`],
     ["trap anywhere", `S=${S}; trap 'S=/Users/me' DEBUG; rm -rf $S`],
     ["command eval", `S=${S}; command eval "$X"; rm -rf $S`],
+    ["eval spelled as a brace expansion", `S=${S}; {eval,S=/Users/me}; rm -rf $S`],
+    ["eval spelled as a glob", `S=${S}; touch eval; [e]val S=/Users/me; rm -rf $S`],
     ["PWD reassigned, then cd", `PWD=${S}; cd /Users/me; rm -rf $PWD`],
     ["IFS reassigned", `IFS=/; S=${S}; rm -rf $S`],
     ["one target resolves, another does not", `S=${S}; rm -rf $S $T`],
