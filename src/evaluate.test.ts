@@ -178,6 +178,8 @@ describe("rm reads a variable the same line set", () => {
     `S=${S}; if [ -d $S ]; then rm -rf $S; fi`,
     `S=${S}; for i in 1 2; do rm -rf $S; done`,
     `A=/tmp/a B=${S}; rm -rf $A $B`,
+    `S=${S}; rm -rf $S; $S/cat x`,
+    `S=${S}; rm -rf $S; mkdir -p $S; "$S"/cat x`,
   ]
   for (const line of allows) {
     test(`${JSON.stringify(line)} → allow`, async () => {
@@ -229,6 +231,10 @@ describe("rm reads a variable the same line set", () => {
     ["trap anywhere", `S=${S}; trap 'S=/Users/me' DEBUG; rm -rf $S`],
     ["command eval", `S=${S}; command eval "$X"; rm -rf $S`],
     ["eval spelled as a brace expansion", `S=${S}; {eval,S=/Users/me}; rm -rf $S`],
+    ["an expanded command name", `S=${S}; $Y; rm -rf $S`],
+    ["eval through a variable", `X=eval; S=${S}; $X 'S=/Users/me'; rm -rf $S`],
+    ["eval split out of $X/foo", `X='eval S=/Users/me #'; S=${S}; $X/foo; rm -rf $S`],
+    ["a path command through a variable assigned twice", `P=/bin; P=/x; S=${S}; $P/foo; rm -rf $S`],
     ["eval spelled as a glob", `S=${S}; touch eval; [e]val S=/Users/me; rm -rf $S`],
     ["PWD reassigned, then cd", `PWD=${S}; cd /Users/me; rm -rf $PWD`],
     ["IFS reassigned", `IFS=/; S=${S}; rm -rf $S`],
@@ -239,6 +245,14 @@ describe("rm reads a variable the same line set", () => {
       expect(await judgeLine(line, repo)).toEqual(ASK)
     })
   }
+
+  test("a script run through the variable leaves the rm judged as written out", async () => {
+    // loop.sh is a script hall-pass does not know: no opinion, as when typed out.
+    const typed = await judgeLine(`rm -rf ${S}; ${S}/loop.sh a`, repo)
+    expect(typed).toEqual({ decision: "pass", reason: "pipeline contains unknown commands" })
+    expect(await judgeLine(`S=${S}; rm -rf $S; $S/loop.sh a`, repo)).toEqual(typed)
+    expect(await judgeLine(`S=${S}; rm -rf $S; mkdir -p $S; $S/loop.sh a b`, repo)).toEqual(typed)
+  })
 
   test("a variable rm resolves stays a placeholder for every other rule", () => {
     expect(judge(cmd("rm", "-rf", "$S"), repo).decision).toBe("prompt")

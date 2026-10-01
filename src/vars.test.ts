@@ -29,6 +29,10 @@ describe("literalVariables", () => {
     expect(known("A=/tmp/a B=/tmp/b\nrm $A $B")).toEqual({ A: "/tmp/a", B: "/tmp/b" })
     expect(known("S=/tmp/x; printf '%s\\n' Saved; rm -rf $S")).toEqual({ S: "/tmp/x" })
     expect(known(`S=/tmp/x; [[ -d $S ]] && echo "\${a[0]}" "\${a[@]}"; export PATH=$PATH:/x; rm -rf $S`)).toEqual({ S: "/tmp/x" })
+    // A command the shell runs as a file is a child process: it cannot write S.
+    expect(known("S=/tmp/x; $S/loop.sh a; rm -rf $S")).toEqual({ S: "/tmp/x" })
+    expect(known("S=/tmp/x; P=/usr/bin/env; $P true; \"$S\"/a; \${S}/b; command $S/c; rm -rf $S")).toEqual({ S: "/tmp/x", P: "/usr/bin/env" })
+    expect(known(`S=/tmp/x; ./$X; "$X"/y; "$X/y"; '/'$X; ~/bin/$X; a/$(b); rm -rf $S`)).toEqual({ S: "/tmp/x" })
     // Quoted, or not an expansion at all: the command is named as written.
     expect(known(`S=/tmp/x; [ -d $S ] && 'ev?l' && "{a,b}" && ec{ho x; rm -rf $S`)).toEqual({ S: "/tmp/x" })
   })
@@ -104,6 +108,16 @@ describe("literalVariables", () => {
     ["a bracket glob", "S=/tmp/x; [e]val S=/"],
     ["a star glob", "S=/tmp/x; e*l S=/"],
     ["a brace behind command", "S=/tmp/x; command {eval,S=/}"],
+    ["an expansion before the slash: $X/foo can split into eval", "S=/tmp/x; $X/foo"],
+    ["a braced expansion before the slash", "S=/tmp/x; ${X}/foo"],
+    ["a command substitution before the slash", "S=/tmp/x; $(echo eval)/foo"],
+    ["a slash only inside a brace", "S=/tmp/x; {eval,/}x"],
+    ["a brace with an expansion", "S=/tmp/x; {a,$X}/foo"],
+    ["a path through a variable read before it is set", "S=/tmp/x; $P/x; P=/bin"],
+    ["a path through a variable assigned twice", "S=/tmp/x; P=/bin; P=/usr/bin; $P/x"],
+    ["a path through a relative variable", "S=/tmp/x; P=bin; $P/x"],
+    ["a path through ${P:-x}", "S=/tmp/x; P=/bin; ${P:-eval}/x"],
+    ["S itself names a command after it is dropped", "S=/tmp/x; $S/x; read S"],
     ["IFS assigned", "IFS=/; S=/tmp/x"],
     ["IFS read", "S=/tmp/x; read -r IFS"],
     ["PWD", "PWD=/tmp/x"],
