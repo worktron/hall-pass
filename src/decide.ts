@@ -19,6 +19,7 @@ import { checkFilePath } from "./paths.ts"
 import { checkFeedbackRules } from "./feedback.ts"
 import { createEvalContext } from "./evaluate.ts"
 import { literalVariables } from "./vars.ts"
+import { rootScope, scopeOf } from "./places.ts"
 import { detectSecret } from "./secrets.ts"
 import { detectExfilDomain } from "./network.ts"
 import { parseApplyPatch, checkPatch } from "./patch.ts"
@@ -273,7 +274,8 @@ export async function decide(
   }
 
   // -- Per-command evaluation --
-  const ctx = createEvalContext(config, commandInfos, shfmtBin, deps.cwd)
+  const scope = scopeOf(rootScope(deps.cwd), ast, commandInfos, command)
+  const ctx = createEvalContext(config, commandInfos, shfmtBin, deps.cwd, scope)
 
   let hasPass = false
   let handedOver: string | null = null   // first judgment-call prompt deferred to the classifier

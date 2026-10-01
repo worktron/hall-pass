@@ -125,7 +125,7 @@ interface WriterScan {
   unbounded: boolean
 }
 
-function scanWriters(ast: unknown): WriterScan {
+export function scanWriters(ast: unknown): WriterScan {
   const scan: WriterScan = { assigns: new Map(), doubted: new Set(), writerText: [], unbounded: false }
 
   const countAssign = (assign: Node) => {
