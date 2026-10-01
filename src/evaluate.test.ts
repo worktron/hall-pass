@@ -317,3 +317,129 @@ describe("a shell judged by the repository script it runs", () => {
     expect(await judgeLine("bash -", repo)).toMatchObject({ decision: "ask", reason: "bash: script execution" })
   })
 })
+
+describe("rm and bash <script> follow the line's cd and TMPDIR", () => {
+  const scratchpad = "/private/tmp/claude-501/-Users-me-proj/7a8c79ec/scratchpad"
+  const checkout = resolve(import.meta.dir, "..")   // tracks bin/run-hook.sh
+  const ALLOW = { decision: "allow", reason: "all commands safe" } as const
+  const RM_ASK = { decision: "ask", reason: "dangerous: rm", message: `"rm" is a destructive command` } as const
+  const SCRIPT_ASK = { decision: "ask", reason: "bash: script execution", message: `Running "bash" with a script file` } as const
+
+  // A copy of the fixture's layout that no repository tracks.
+  const evil = resolve(home, "evil")
+  mkdirSync(resolve(evil, "scripts"), { recursive: true })
+  writeFileSync(resolve(evil, "scripts", "x.sh"), "#!/bin/sh\necho evil\n")
+
+  /** Run with the hook's TMPDIR set to a temp directory, as on macOS. */
+  async function withTmpdir<T>(run: () => Promise<T>): Promise<T> {
+    const saved = process.env.TMPDIR
+    process.env.TMPDIR = saved || tmpdir()
+    try {
+      return await run()
+    } finally {
+      if (saved === undefined) delete process.env.TMPDIR
+      else process.env.TMPDIR = saved
+    }
+  }
+
+  test("cd ~/Workspace/hall-pass && rm -rf src from a scratchpad → prompt; rm -rf src alone → allow", async () => {
+    expect(await judgeLine("cd ~/Workspace/hall-pass && rm -rf src", scratchpad)).toEqual(RM_ASK)
+    expect(await judgeLine(`cd ${repo} && rm -rf src`, scratchpad)).toEqual(RM_ASK)
+    expect(await judgeLine("rm -rf src", scratchpad)).toEqual(ALLOW)
+  })
+
+  test("cd /private/tmp/evil && bash bin/run-hook.sh from the checkout → prompt; bash bin/run-hook.sh alone → allow", async () => {
+    expect(await judgeLine("cd /private/tmp/evil && bash bin/run-hook.sh", checkout)).toEqual(SCRIPT_ASK)
+    expect(await judgeLine(`cd ${evil} && bash scripts/x.sh`, repo)).toEqual(SCRIPT_ASK)
+    expect(await judgeLine("bash bin/run-hook.sh", checkout)).toEqual(ALLOW)
+  })
+
+  test("TMPDIR=$HOME; rm -rf $TMPDIR/Documents → prompt; rm -rf $TMPDIR/Documents alone → allow", async () => {
+    await withTmpdir(async () => {
+      expect(await judgeLine("TMPDIR=$HOME; rm -rf $TMPDIR/Documents", scratchpad)).toEqual(RM_ASK)
+      expect(await judgeLine("rm -rf $TMPDIR/Documents", scratchpad)).toEqual(ALLOW)
+      expect(await judgeLine("rm -rf ${TMPDIR}/Documents", scratchpad)).toEqual(ALLOW)
+    })
+  })
+
+  const tmpdirWrites: [string, string][] = [
+    ["export", "export TMPDIR=$HOME; rm -rf $TMPDIR/Documents"],
+    ["prefix assignment", "TMPDIR=$HOME rm -rf $TMPDIR/Documents"],
+    ["read", "read TMPDIR; rm -rf $TMPDIR/Documents"],
+    ["for loop", "for TMPDIR in $HOME; do rm -rf $TMPDIR/Documents; done"],
+    ["assigning expansion", "echo ${TMPDIR:=$HOME}; rm -rf $TMPDIR/Documents"],
+    ["a writer whose target the text does not show", "declare $V=$HOME; rm -rf $TMPDIR/Documents"],
+    ["inside bash -c", "bash -c 'TMPDIR=$HOME; rm -rf $TMPDIR/Documents'"],
+    ["around bash -c", "TMPDIR=$HOME bash -c 'rm -rf $TMPDIR/Documents'"],
+    ["inside eval", "eval 'TMPDIR=$HOME; rm -rf $TMPDIR/Documents'"],
+  ]
+  for (const [label, line] of tmpdirWrites) {
+    test(`TMPDIR written by ${label}: ${JSON.stringify(line)} → prompt`, async () => {
+      await withTmpdir(async () => {
+        expect((await judgeLine(line, scratchpad)).decision).toBe("ask")
+      })
+    })
+  }
+
+  const moves: [string, string][] = [
+    ["inside bash -c", "bash -c 'cd ~/Workspace/hall-pass && rm -rf src'"],
+    ["inside eval", "eval 'cd ~/Workspace/hall-pass; rm -rf src'"],
+    ["in a subshell", "(cd ~/Workspace/hall-pass; rm -rf src)"],
+    ["in a command substitution", "x=$(cd ~/Workspace/hall-pass && rm -rf src)"],
+    ["after pushd", "pushd ~/Workspace/hall-pass && rm -rf src"],
+    ["after builtin cd", "builtin cd ~/Workspace/hall-pass && rm -rf src"],
+    ["through find -execdir", "find ~/Workspace -name x -execdir rm -rf src \;"],
+    ["after cd to a variable", "cd $D && rm -rf build"],
+    ["after a relative cd", "cd sub && rm -rf build"],
+    ["after cd -", "cd - && rm -rf build"],
+    ["after popd", "popd && rm -rf build"],
+    ["after a bare cd", "cd && rm -rf build"],
+  ]
+  for (const [label, line] of moves) {
+    test(`a relative rm ${label}: ${JSON.stringify(line)} → prompt`, async () => {
+      expect(await judgeLine(line, scratchpad)).toEqual(RM_ASK)
+    })
+  }
+
+  test("cd <scratchpad> && rm -rf out from a project → allow: a leading cd chain runs only there", async () => {
+    expect(await judgeLine(`cd ${scratchpad} && rm -rf out`, repo)).toEqual(ALLOW)
+    expect(await judgeLine(`cd ${scratchpad}/ && rm -rf out && mkdir out`, repo)).toEqual(ALLOW)
+    expect(await judgeLine(`cd ${scratchpad} && cd ${scratchpad}/a && rm -rf out`, repo)).toEqual(ALLOW)
+  })
+
+  test("a variable the line set to a scratchpad path places the cd", async () => {
+    expect(await judgeLine(`S=${scratchpad}; cd $S && rm -rf out`, scratchpad)).toEqual(ALLOW)
+  })
+
+  test("cd <scratchpad> without a clean && chain, from a project → prompt: rm may run in the project", async () => {
+    expect(await judgeLine(`cd ${scratchpad}; rm -rf out`, repo)).toEqual(RM_ASK)
+    expect(await judgeLine(`cd ${scratchpad} || true; rm -rf out`, repo)).toEqual(RM_ASK)
+    expect(await judgeLine(`cd ${scratchpad} && true || rm -rf out`, repo)).toEqual(RM_ASK)
+    expect(await judgeLine(`! cd ${scratchpad} && rm -rf out`, repo)).toEqual(RM_ASK)
+    expect(await judgeLine(`rm -rf out; cd ${scratchpad}`, repo)).toEqual(RM_ASK)
+  })
+
+  test("cd <scratchpad>; rm -rf out from that scratchpad → allow: every place is a scratchpad", async () => {
+    expect(await judgeLine(`cd ${scratchpad}/a; rm -rf out`, scratchpad)).toEqual(ALLOW)
+  })
+
+  test("an absolute rm target does not move with a cd", async () => {
+    expect(await judgeLine(`cd ${repo} && rm -rf ${scratchpad}/out`, repo)).toEqual(ALLOW)
+  })
+
+  test("cd <repo> && bash scripts/x.sh → allow; the same from another repository's cwd needs both to track it", async () => {
+    expect(await judgeLine(`cd ${repo} && bash scripts/x.sh`, scratchpad)).toEqual(ALLOW)
+    expect(await judgeLine(`cd ${repo}; bash scripts/x.sh`, repo)).toEqual(ALLOW)
+    expect(await judgeLine(`cd ${repo}; bash scripts/x.sh`, evil)).toEqual(SCRIPT_ASK)
+  })
+
+  test("an absolute script path is judged by the hook's cwd, as before", async () => {
+    expect(await judgeLine(`cd ${evil} && bash ${resolve(repo, "scripts", "x.sh")}`, repo)).toEqual(ALLOW)
+  })
+
+  test("bash -c and eval start where the line is", async () => {
+    expect(await judgeLine(`cd ${evil} && bash -c 'bash scripts/x.sh'`, repo)).toEqual(SCRIPT_ASK)
+    expect(await judgeLine("bash -c 'rm -rf src'", scratchpad)).toEqual(ALLOW)
+    expect(await judgeLine(`bash -c 'cd ${scratchpad}/a && rm -rf out'`, repo)).toEqual(ALLOW)
+  })
+})

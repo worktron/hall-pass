@@ -13,6 +13,7 @@ import { checkGitCommand } from "./git.ts"
 import { DANGEROUS_ENV_VARS } from "./safelist.ts"
 import { checkFilePath } from "./paths.ts"
 import { parseApplyPatch, checkPatch } from "./patch.ts"
+import { scopeOf } from "./places.ts"
 
 export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 
@@ -91,8 +92,10 @@ export const INSPECTORS: Record<string, Inspector> = {
     }
     const subCommands = extractCommandInfos(ast)
     if (subCommands.length === 0) return allow("eval: no commands")
+    // eval runs in this shell: its cds and TMPDIR writes add to the line's.
+    const inner = ctx.within(scopeOf(ctx.scope, ast, subCommands, script))
     for (const subCmd of subCommands) {
-      const result = ctx.evaluate(subCmd)
+      const result = inner.evaluate(subCmd)
       if (result.decision !== "allow") return result
     }
     return allow("eval: all commands safe")
@@ -210,7 +213,9 @@ export const INSPECTORS: Record<string, Inspector> = {
         }
         if (subArgs.length === 0) return prompt("find: empty -exec", `"find -exec" with no command specified`)
         const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
-        const result = ctx.evaluate(subCmd)
+        // -execdir runs the command in each match's directory: a relative path has no one place.
+        const runner = arg === "-execdir" ? ctx.within({ ...ctx.scope, places: null }) : ctx
+        const result = runner.evaluate(subCmd)
         if (result.decision !== "allow") return result
       }
     }
@@ -1350,8 +1355,10 @@ function shellInspector(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
     return allow(`${shell} -c: no commands`)
   }
 
+  // The script starts where the line is, with its environment, and may move on.
+  const inner = ctx.within(scopeOf(ctx.scope, ast, subCommands, script))
   for (const subCmd of subCommands) {
-    const result = ctx.evaluate(subCmd)
+    const result = inner.evaluate(subCmd)
     if (result.decision !== "allow") return result
   }
 

@@ -26,6 +26,7 @@ import { INSPECTORS } from "./inspectors.ts"
 import { unwrapCommand } from "./wrappers.ts"
 import { isPathAwareCommand, checkCommandPaths } from "./paths.ts"
 import { checkCommandFeedback } from "./feedback.ts"
+import { rootScope, type Scope } from "./places.ts"
 import { extractSqlFromArgs, isSqlReadOnly } from "./sql.ts"
 
 export type EvalResult =
@@ -50,8 +51,16 @@ export interface EvalContext {
   shfmtBin: string
   /** Where the command runs (the hook's cwd); git rules that look at the repository use it. */
   cwd?: string
+  /**
+   * Where relative paths land and whether `$TMPDIR` is the hook's, given the
+   * `cd`s and TMPDIR writes around the command (places.ts). throwawayRm and
+   * repositoryScript read it instead of `cwd`.
+   */
+  scope: Scope
   pipelineCommands: CommandInfo[]
   evaluate: (cmd: CommandInfo) => EvalResult
+  /** The same context for commands that run in another scope: a `bash -c` script, `eval`, `find -execdir`. */
+  within: (scope: Scope) => EvalContext
 }
 
 /**
@@ -62,6 +71,7 @@ export function createEvalContext(
   pipelineCommands: CommandInfo[],
   shfmtBin: string = "shfmt",
   cwd?: string,
+  scope: Scope = rootScope(cwd),
 ): EvalContext {
   const configSafe = new Set(config.commands.safe)
   const dbClients = new Set([...DB_CLIENTS, ...config.commands.db_clients])
@@ -80,10 +90,22 @@ export function createEvalContext(
     safeSubcommands,
     shfmtBin,
     cwd,
+    scope,
     pipelineCommands,
     evaluate: (cmd) => evaluateBashCommand(cmd, ctx),
+    within: (inner) => scopedContext(ctx, inner),
   }
 
+  return ctx
+}
+
+function scopedContext(outer: EvalContext, scope: Scope): EvalContext {
+  const ctx: EvalContext = {
+    ...outer,
+    scope,
+    evaluate: (cmd) => evaluateBashCommand(cmd, ctx),
+    within: (inner) => scopedContext(ctx, inner),
+  }
   return ctx
 }
 
@@ -171,10 +193,13 @@ function climbsOut(path: string): boolean {
  * target is a literal path that lands strictly inside a throwaway root
  * (isInsideScratchDir: the OS tmpdir, $TMPDIR, /tmp, /var/folders, a
  * `scratchpad` directory) with no `..` segment; `-r` and `-f` change
- * nothing. `$TMPDIR/x` is read with the hook's own TMPDIR, since the
- * command's shell inherits the same one. A bare `rm -rf`, a root itself
- * (`rm -rf /tmp`), a glob, any other variable, a relative path with no cwd,
- * or a target anywhere else keeps the dangerous-command prompt. A variable
+ * nothing. A relative path has to land there from every directory the
+ * line could be in (ctx.scope.places: the hook's cwd and each `cd` target).
+ * `$TMPDIR/x` is read with the hook's own TMPDIR, since the command's shell
+ * inherits the same one, unless the line may set TMPDIR itself. A bare
+ * `rm -rf`, a root itself (`rm -rf /tmp`), a glob, any other variable, a
+ * relative path after a `cd` that cannot be placed or with no cwd, or a
+ * target anywhere else keeps the dangerous-command prompt. A variable
  * the line itself set to a literal path (`S=/tmp/x; rm -rf $S`) is read as
  * that path: resolvedArgs, which vars.ts fills only when nothing else on the
  * line can change it.
@@ -193,16 +218,13 @@ function throwawayRm(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult | null 
     let target = raw
     if (target === "$TMPDIR" || target.startsWith("$TMPDIR/")) {
       const tmp = process.env.TMPDIR
-      if (!tmp) return null
+      if (!tmp || !ctx.scope.tmpdirTrusted) return null
       target = tmp.replace(/\/+$/, "") + target.slice("$TMPDIR".length)
     }
     if (UNRESOLVABLE_PATH.test(target) || climbsOut(target)) return null
     target = expandTilde(target)
-    if (!isAbsolute(target)) {
-      if (!ctx.cwd) return null
-      target = resolve(ctx.cwd, target)
-    }
-    if (!isInsideScratchDir(target)) return null
+    const landings = isAbsolute(target) ? [target] : ctx.scope.places?.map((place) => resolve(place, target))
+    if (!landings || !landings.every((path) => isInsideScratchDir(path))) return null
   }
   return { decision: "allow", reason: "rm: throwaway paths" }
 }
@@ -217,7 +239,11 @@ const SCRIPT_SHELLS = new Set(["sh", "bash", "zsh"])
  * the tree). Running the repository's own script by name is the same act as
  * `./scripts/x.sh`, which the safelist never asked about. A `-c` string, a
  * script on stdin (`bash -`, a heredoc, a pipe), an untracked file, a file
- * outside the repository, or no cwd stays with the shell inspector.
+ * outside the repository, or no cwd stays with the shell inspector. A
+ * relative path has to name such a file from every directory the line could
+ * be in (ctx.scope.places), so `cd /tmp/x && bash scripts/y.sh` is judged
+ * by /tmp/x/scripts/y.sh; an absolute one is judged by the hook's cwd, as
+ * the path does not move with a `cd`.
  */
 function repositoryScript(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult | null {
   if (!ctx.cwd) return null
@@ -234,11 +260,15 @@ function repositoryScript(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult | 
   if (!script) return null
   if (UNRESOLVABLE_PATH.test(script) || climbsOut(script)) return null
   if (script.startsWith("~") || script.startsWith(":")) return null   // not a plain path, or pathspec magic
-  if (!gitTracksFile(ctx.cwd, script)) return null
-  try {
-    if (!lstatSync(resolve(ctx.cwd, script)).isFile()) return null
-  } catch {
-    return null
+  const places = isAbsolute(script) ? [ctx.cwd] : ctx.scope.places
+  if (!places) return null
+  for (const place of places) {
+    if (!gitTracksFile(place, script)) return null
+    try {
+      if (!lstatSync(resolve(place, script)).isFile()) return null
+    } catch {
+      return null
+    }
   }
   return { decision: "allow", reason: `${cmdInfo.name}: repository script ${script}` }
 }
