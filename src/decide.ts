@@ -17,12 +17,14 @@ import type { DebugFn } from "./debug.ts"
 import type { AuditLogger } from "./audit.ts"
 import { checkFilePath } from "./paths.ts"
 import { checkFeedbackRules } from "./feedback.ts"
-import { createEvalContext } from "./evaluate.ts"
+import { createEvalContext, evaluateBashCommand, type EvalContext, type EvalResult } from "./evaluate.ts"
 import { literalVariables } from "./vars.ts"
 import { rootScope, scopeOf } from "./places.ts"
 import { detectSecret } from "./secrets.ts"
 import { detectExfilDomain } from "./network.ts"
 import { parseApplyPatch, checkPatch } from "./patch.ts"
+import { possibleValues, substitute, hasPlaceholder, MAX_VARIANTS, type PossibleValues } from "./values.ts"
+import type { CommandInfo } from "./parser.ts"
 
 export type HookDecision =
   | { decision: "allow"; reason: string }
@@ -234,6 +236,35 @@ export async function decide(
   const commandInfos = extractCommandInfos(ast, literalVariables(ast))
   debug("commands", commandInfos.map((c) => c.name))
 
+  // Every value a variable could hold on this line (values.ts). The checks
+  // below run against those values as well as the words as written, so
+  // `E=.env; echo x > $E` stops like `echo x > .env`. A value nobody can read
+  // where a protected check looks is a judgment call, held here until every
+  // command has had its chance at a hard stop.
+  const values = possibleValues(ast)
+  let unreadable: { reason: string; message: string } | null = null
+
+  const redirects = extractRedirects(ast)
+  debug("redirects", redirects)
+
+  // Exfiltration domains, once more over the words with quotes removed and
+  // variables substituted: `H=pastebin.com; curl https://$H/x`.
+  const words = [...commandInfos.flatMap((c) => c.args.slice(1)), ...redirects.filter((r) => !r.kind).map((r) => r.path)]
+  for (const word of words) {
+    for (const expanded of substitute(word, values)) {
+      const domain = detectExfilDomain(expanded)
+      if (domain) {
+        debug("exfil", { domain, word })
+        audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `exfil: ${domain}`, layer: "network" })
+        return hardStop(`exfil: ${domain}`, `Command targets known data-exfiltration service "${domain}"`)
+      }
+      const host = urlHost(expanded)
+      if (host !== null && hasPlaceholder(host)) {
+        unreadable ??= { reason: `url-unknown: ${host}`, message: `A URL's host is held in a variable hall-pass cannot read (${word})` }
+      }
+    }
+  }
+
   // Pipe target inspection — genuine `curl | bash`, NOT `&&`/`||` chains.
   const PIPE_SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "eval"])
   for (const name of extractPipeTargets(ast)) {
@@ -244,17 +275,21 @@ export async function decide(
     }
   }
 
-  // Redirects against protected paths
-  const redirects = extractRedirects(ast)
-  debug("redirects", redirects)
-
+  // Redirects against protected paths, as written and with each value
+  // their variables could hold.
   for (const redir of redirects) {
     const op = redir.op === "write" ? ("write" as const) : ("read" as const)
-    const decision = checkFilePath(redir.path, op, config)
-    if (!decision.allowed) {
-      debug("redirect-block", { path: redir.path, op, reason: decision.reason })
-      audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `redirect ${decision.reason}`, layer: "paths" })
-      return hardStop(`redirect-blocked: ${decision.reason}`, `Redirect targets ${decision.reason}`)
+    const expanded = redir.kind ? [] : substitute(redir.path, values)
+    for (const path of new Set([redir.path, ...expanded])) {
+      const decision = checkFilePath(path, op, config)
+      if (!decision.allowed) {
+        debug("redirect-block", { path, op, reason: decision.reason })
+        audit.log({ tool: "Bash", input: command, decision: "prompt", reason: `redirect ${decision.reason}`, layer: "paths" })
+        return hardStop(`redirect-blocked: ${decision.reason}`, `Redirect targets ${decision.reason}`)
+      }
+    }
+    if (expanded.some(hasPlaceholder)) {
+      unreadable ??= { reason: `redirect-unknown: ${redir.path}`, message: `Redirect target is held in a variable hall-pass cannot read (${redir.path})` }
     }
   }
 
@@ -267,8 +302,19 @@ export async function decide(
   let suggestionLayer = "feedback"
   if (suggestion) debug("feedback", { suggestion })
 
+  /** The held judgment call, once nothing on the line was a hard stop. */
+  const settleUnreadable = (): HookDecision | null => {
+    if (!unreadable) return null
+    debug("unreadable", unreadable)
+    if (defer) return deferred(unreadable.reason)
+    audit.log({ tool: "Bash", input: command, decision: "prompt", reason: unreadable.reason, layer: "placeholders" })
+    return prompt(unreadable.reason, unreadable.message)
+  }
+
   // No commands found (e.g., bare variable assignment) — safe
   if (commandInfos.length === 0) {
+    const held = settleUnreadable()
+    if (held) return held
     audit.log({ tool: "Bash", input: command, decision: "allow", reason: "no commands", layer: "safelist" })
     return allow("no commands (variable assignment)")
   }
@@ -276,11 +322,12 @@ export async function decide(
   // -- Per-command evaluation --
   const scope = scopeOf(rootScope(deps.cwd), ast, commandInfos, command)
   const ctx = createEvalContext(config, commandInfos, shfmtBin, deps.cwd, scope)
+  const strictCtx: EvalContext = { ...ctx, strictPlaceholders: true, evaluate: (cmd) => evaluateBashCommand(cmd, strictCtx) }
 
   let hasPass = false
   let handedOver: string | null = null   // first judgment-call prompt deferred to the classifier
   for (const cmdInfo of commandInfos) {
-    const result = ctx.evaluate(cmdInfo)
+    const result = evaluateWithValues(cmdInfo, values, ctx, strictCtx)
     debug("eval", { name: cmdInfo.name, decision: result.decision })
 
     if (result.decision === "feedback") {
@@ -307,6 +354,8 @@ export async function decide(
   // outranks a nudge (the nudge would be an allow, and the classifier has
   // to see the command); a nudge outranks an unknown command, as before.
   if (handedOver) return deferred(handedOver)
+  const held = settleUnreadable()
+  if (held) return held
 
   if (suggestion) {
     audit.log({ tool: "Bash", input: command, decision: "feedback", reason: suggestion, layer: suggestionLayer })
@@ -321,4 +370,59 @@ export async function decide(
 
   audit.log({ tool: "Bash", input: command, decision: "allow", reason: "all commands safe", layer: "evaluate" })
   return allow("all commands safe")
+}
+
+/**
+ * One command, judged as written and with each value its variables could
+ * hold (values.ts). The command as written is judged by today's rules, so a
+ * guessed value can never talk a rule into an allow. A variant can only add
+ * a protected stop (the hard prompt its typed-out form gets) or, judged under
+ * strictPlaceholders, the judgment call for a value nobody can read. Its
+ * other judgment calls are dropped: a rule that allowed the command as
+ * written read the variable on purpose (safe_scripts lists
+ * `$HOME/.claude/...`, vars.ts resolves `$S` for rm).
+ */
+function evaluateWithValues(cmdInfo: CommandInfo, values: PossibleValues, ctx: EvalContext, strictCtx: EvalContext): EvalResult {
+  const variants = commandVariants(cmdInfo, values)
+  if (variants.length === 0) return strictCtx.evaluate(cmdInfo)
+
+  const asWritten = ctx.evaluate(cmdInfo)
+  if (asWritten.decision === "prompt") return asWritten
+  let judgment: EvalResult | null = null
+  for (const variant of variants) {
+    const result = strictCtx.evaluate(variant)
+    if (result.decision !== "prompt") continue
+    if (result.hard) return result
+    if (result.unreadable) judgment ??= result
+  }
+  return judgment ?? asWritten
+}
+
+/** The command with its variables replaced by candidate values; empty when none of its words change. */
+function commandVariants(cmdInfo: CommandInfo, values: PossibleValues): CommandInfo[] {
+  const options = cmdInfo.args.map((arg) => substitute(arg, values))
+  if (options.every((o, i) => o.length === 1 && o[0] === cmdInfo.args[i])) return []
+
+  let combos: string[][] = [[]]
+  for (const opts of options) {
+    const next: string[][] = []
+    for (const combo of combos) {
+      for (const o of opts) {
+        if (next.length >= MAX_VARIANTS) break
+        next.push([...combo, o])
+      }
+    }
+    combos = next
+  }
+  return combos.map((args) => {
+    const name = args[0]!.split("/").pop()!
+    return { ...cmdInfo, name, args: [name, ...args.slice(1)] }
+  })
+}
+
+/** The host of an http(s) URL in a word, without user info or port; null when the word has none. */
+function urlHost(word: string): string | null {
+  const m = word.match(/https?:\/\/([^/?#\s]*)/i)
+  if (!m) return null
+  return m[1]!.replace(/^.*@/, "").replace(/:[^:]*$/, "")
 }

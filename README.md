@@ -45,6 +45,8 @@ A push to a protected branch name (`main`, `staging`, …) is judged by where it
 
 A variable in the command line keeps its place: `git -C $DIR reset --hard` is read as a `reset --hard`, not as bare `git`. (Expansions render as `$NAME` / `$(...)` placeholders in the parsed arguments, which can never match a protected path or branch name.)
 
+A variable cannot hide a protected value. The checks for protected paths, protected branches, git's executable config keys and exfiltration domains run against every value the line could give a variable, plus the hook's own `$HOME` and `$TMPDIR`: `E=.env; echo x > $E`, `B=main; git push -f origin $B`, `V=core.hooksPath; git config $V /tmp/h` and `H=pastebin.com; curl https://$H/x` stop exactly like their typed-out forms. A value the line cannot pin down (from `$(...)`, a loop over command output, `read`, or the shell profile) sitting where one of those checks looks (a redirect target, a path argument of a file command, a push target, a config key being written, a URL's host) is a judgment call: the classifier in auto and plan mode, a prompt elsewhere.
+
 ### Layer 3: SQL safety
 
 Database clients (`psql`, `mysql`, `sqlite3`) get SQL-level inspection using [pgsql-ast-parser](https://github.com/oguimbal/pgsql-ast-parser). Read-only queries are auto-approved; writes prompt.

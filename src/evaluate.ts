@@ -38,7 +38,11 @@ export type EvalResult =
    * own reviewer (auto mode's classifier) decide.ts hands it over instead of
    * forcing the user to answer — see DEFER_MODES there.
    */
-  | { decision: "prompt"; reason: string; message: string; hard?: boolean }
+  /**
+   * `unreadable` marks the judgment call strictPlaceholders adds: a protected
+   * check met a value nobody can read.
+   */
+  | { decision: "prompt"; reason: string; message: string; hard?: boolean; unreadable?: boolean }
   | { decision: "pass"; reason: string }
   | { decision: "feedback"; suggestion: string }
 
@@ -58,6 +62,13 @@ export interface EvalContext {
    */
   scope: Scope
   pipelineCommands: CommandInfo[]
+  /**
+   * Set when the words have had every value the line can pin down substituted
+   * in (decide.ts). A `$` left in a word a protected check reads (a path
+   * argument, a push target, a git config key) is then a value nobody can
+   * read, and the check makes it a judgment call instead of passing it.
+   */
+  strictPlaceholders?: boolean
   evaluate: (cmd: CommandInfo) => EvalResult
   /** The same context for commands that run in another scope: a `bash -c` script, `eval`, `find -execdir`. */
   within: (scope: Scope) => EvalContext
@@ -114,6 +125,23 @@ function scopedContext(outer: EvalContext, scope: Scope): EvalContext {
  * Called for top-level commands and recursively for sub-commands.
  */
 export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
+  let unknownPath: string | undefined
+  const result = evaluateSteps(rawCmdInfo, ctx, (arg) => { unknownPath = arg })
+  // A path held in an unreadable variable only stops a command that would
+  // otherwise go through; every other verdict already involves a review.
+  if (unknownPath && (result.decision === "allow" || result.decision === "feedback")) {
+    const name = unwrapCommand(rawCmdInfo).name
+    return {
+      decision: "prompt",
+      reason: `path-unknown: ${name} ${unknownPath}`,
+      message: `"${name}" uses a path held in a variable hall-pass cannot read (${unknownPath})`,
+      unreadable: true,
+    }
+  }
+  return result
+}
+
+function evaluateSteps(rawCmdInfo: CommandInfo, ctx: EvalContext, onUnknownPath: (arg: string) => void): EvalResult {
   // 1. Unwrap transparent wrappers (nohup, nice, timeout)
   const cmdInfo = unwrapCommand(rawCmdInfo)
   const { name } = cmdInfo
@@ -138,10 +166,11 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
 
   // 4. Path checking (only for commands whose positional args are file paths)
   if (isPathAwareCommand(name)) {
-    const pathDecision = checkCommandPaths(cmdInfo, ctx.config)
+    const pathDecision = checkCommandPaths(cmdInfo, ctx.config, ctx.strictPlaceholders)
     if (!pathDecision.allowed) {
       return { decision: "prompt", reason: `path-blocked: ${name} ${pathDecision.reason}`, message: `"${name}" targets ${pathDecision.reason}`, hard: true }
     }
+    if (pathDecision.unknown) onUnknownPath(pathDecision.unknown)
   }
 
   // 5. Safe commands — auto-approve

@@ -205,7 +205,7 @@ describe("extractRedirects", () => {
     // Op 59 (>&) targets an FD, not a path. Word value is "1" — left as read so
     // checkFilePath skips it (no glob will match the literal "1").
     const redirs = await redirectsIn("echo hi 2>&1")
-    expect(redirs).toEqual([{ path: "1", op: "read" }])
+    expect(redirs).toEqual([{ path: "1", op: "read", kind: "fd" }])
   })
 })
 

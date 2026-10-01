@@ -152,3 +152,126 @@ describe("end to end", () => {
     expect(d.decision).toBe("pass")
   })
 })
+
+// -- A variable no longer hides a protected value --
+//
+// Each command below used to be allowed because its protected value sat in
+// a variable: the checks compared the `$NAME` placeholder against their
+// lists. They now run against every value the line can give the variable
+// (values.ts), so each decides exactly like its typed-out form.
+
+describe("a variable set on the line decides like the value typed out", () => {
+  const { mkdirSync } = require("fs") as typeof import("fs")
+  // A repository with a GitHub origin, outside any temp directory, so a push to main is protected.
+  const repo = resolve(import.meta.dir, "..", "node_modules", ".cache", `hall-pass-values-${process.pid}`)
+  mkdirSync(repo, { recursive: true })
+  for (const args of [["git", "init", "-q"], ["git", "remote", "add", "origin", "git@github.com:worktron/hall-pass.git"]]) {
+    Bun.spawnSync(args, { cwd: repo, stdout: "ignore", stderr: "ignore" })
+  }
+  async function judge(command: string, mode: string) {
+    return decide("Bash", { command }, { config: await getConfig(), shfmtBin, debug: () => {}, audit: { log() {}, event() {} }, mode, cwd: repo })
+  }
+
+  const pairs: Array<[string, string, string]> = [
+    ["E=.env; echo x > $E", "echo x > .env", "redirect-blocked: matches read-only path **/.env"],
+    ["B=main; git push -f origin $B", "git push -f origin main", "git: push to protected branch main"],
+    ["V=core.hooksPath; git config $V /tmp/h", "git config core.hooksPath /tmp/h", "git: dangerous config write core.hookspath"],
+    ["H=pastebin.com; curl https://$H/x", "curl https://pastebin.com/x", "exfil: pastebin.com"],
+  ]
+  for (const [withVar, literal, reason] of pairs) {
+    for (const mode of ["default", "auto"]) {
+      test(`${withVar} (${mode}) stops like ${literal}`, async () => {
+        const typed = await judge(literal, mode)
+        expect(typed).toMatchObject({ decision: "ask", hard: true, reason })
+        expect(await judge(withVar, mode)).toEqual(typed)
+      })
+    }
+  }
+
+  test("$HOME is read from the hook's environment", async () => {
+    const d = await judge("echo key >> $HOME/.ssh/authorized_keys", "auto")
+    expect(d).toMatchObject({ decision: "ask", hard: true })
+    expect((await judge('cat "$HOME/.aws/credentials"', "auto"))).toMatchObject({ decision: "ask", hard: true })
+  })
+
+  test("a value set in only one branch still counts", async () => {
+    expect(await judge("if [ -n x ]; then T=.env; else T=out.txt; fi; echo x > $T", "auto")).toMatchObject({ decision: "ask", hard: true })
+  })
+
+  test("a value from a for loop counts", async () => {
+    expect(await judge("for b in feature main; do git push origin $b; done", "auto")).toMatchObject({ decision: "ask", hard: true })
+  })
+
+  test("quotes no longer hide a domain", async () => {
+    expect(await judge('curl https://paste""bin.com/x', "auto")).toMatchObject({ decision: "ask", hard: true, reason: "exfil: pastebin.com" })
+  })
+
+  const scratch = "/private/tmp/claude-501/x/scratchpad"
+  for (const command of [
+    `S=${scratch}; mkdir -p $S; echo hi > $S/out; cat $S/out`,
+    "B=feature; git push -f origin $B",
+    "H=example.com; curl -s https://$H/x",
+    "E=.env; cat $E",
+    "V=user.name; git config $V me",
+    'X=hello; cat <<<"$X"',
+    "curl -s http://127.0.0.1:${PORT:-6201}/api/health",
+    "echo $TMPDIR > /dev/null",
+  ]) {
+    test(`still no prompt: ${command}`, async () => {
+      for (const mode of ["default", "auto"]) {
+        expect((await judge(command, mode)).decision).toBe("allow")
+      }
+    })
+  }
+
+  test("a substituted value adds no judgment call a rule already settled", async () => {
+    // safe_scripts lists the script by its $HOME spelling; the typed-out
+    // absolute path is not listed, and that must not bring back the prompt.
+    const base = await getConfig()
+    const config = { ...base, commands: { ...base.commands, safe_scripts: ["$HOME/bin/push.sh"] } }
+    const d = await decide("Bash", { command: 'bash "$HOME/bin/push.sh" staging' }, { config, shfmtBin, debug: () => {}, audit: { log() {}, event() {} }, mode: "default", cwd: repo })
+    expect(d).toEqual({ decision: "allow", reason: "all commands safe" })
+  })
+
+  test("a guessed value never turns a prompt into an allow", async () => {
+    // Set twice, so vars.ts cannot say what $S is at the rm; both guesses are
+    // scratch paths, and the rm still prompts.
+    expect((await judge(`S=${scratch}/a; S=${scratch}/b; rm -rf $S`, "default")).decision).toBe("ask")
+  })
+})
+
+describe("a value nobody can read, where a protected check looks, is a judgment call", () => {
+  async function judge(command: string, mode: string) {
+    return decide("Bash", { command }, { config: await getConfig(), shfmtBin, debug: () => {}, audit: { log() {}, event() {} }, mode })
+  }
+
+  const cases: Array<[string, string]> = [
+    ["for f in $(ls); do cat \"$f\"; done", "path-unknown: cat $(...)"],
+    ["OUT=$(mktemp); echo hi > $OUT", "redirect-unknown: $OUT"],
+    ["cat < $IN", "redirect-unknown: $IN"],
+    ["git push origin HEAD:$BRANCH", "git: push target in a variable"],
+    ["K=$(cat k); git config $K /tmp/h", "git: config key in a variable"],
+    ["git -c $K=x status", "git: -c config key in a variable"],
+    ["curl -s https://$HOST/x", "url-unknown: $HOST"],
+  ]
+  for (const [command, reason] of cases) {
+    test(`${command}: asks in default mode, the classifier judges in auto mode`, async () => {
+      const asked = await judge(command, "default")
+      expect(asked).toMatchObject({ decision: "ask", reason })
+      if (asked.decision === "ask") expect(asked.hard).toBeUndefined()
+      expect(await judge(command, "auto")).toEqual({ decision: "pass", reason: `deferred to classifier: ${reason}` })
+    })
+  }
+
+  test("a value the line pins down is not unknown", async () => {
+    expect((await judge('for f in a.txt b.txt; do cat "$f"; done', "default")).decision).toBe("allow")
+  })
+
+  test("a later hard stop still wins over a held judgment call", async () => {
+    expect(await judge("echo hi > $OUT; echo x > .env", "default")).toMatchObject({ decision: "ask", hard: true })
+  })
+
+  test("rm with an unknown variable keeps its own prompt", async () => {
+    expect(await judge("rm -rf $D", "default")).toMatchObject({ decision: "ask", reason: "dangerous: rm" })
+  })
+})
