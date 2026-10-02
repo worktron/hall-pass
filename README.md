@@ -90,6 +90,8 @@ bun run eval    # replay recorded traffic through the current decide() and diff
 
 A prompt reason that is always approved is a safelist gap; one that is frequently declined is earning its keep. ("Not run" conflates user-denied with interrupted — Claude Code has no hook that reports the user's actual choice.)
 
+`bun run jev` labels the logged commands with Jev, TypeSafe AI's command-kind classifier, offline, so a person can grow the rules from the result: unknown commands it reads as inspect or build every time are safelist candidates, and allowed commands it reads as delete, remote, credentials or system are possible holes. It never decides anything at runtime. `--plan` shows the request count, the cost and sample requests without sending anything; what is sent is redacted (see `src/jev.ts`), answers are stored in `~/.local/share/hall-pass/jev/` and paid for once.
+
 ## Auto mode: judgment calls go to the classifier
 
 A hook that answers `ask` forces a permission prompt in **every** permission mode — Claude Code's docs say so, and auto mode makes no exception. In auto mode Claude Code has its own reviewer, a classifier that reads the command and the conversation around it and approves routine work silently. So in auto mode an `ask` from hall-pass for a judgment call — is this `rm`, `sudo`, `ssh`, inline `perl`, in-place `sed`, database write, or unknown git subcommand what you meant? — is a prompt that would not otherwise exist.
@@ -316,6 +318,9 @@ src/
   paths.ts       File path protection with glob matching
   debug.ts       Debug logging to stderr
   audit.ts       Audit logging to JSON Lines file
+  stats.ts       Audit log report (bun run stats)
+  eval.ts        Replay the audit log through decide() (bun run eval)
+  jev.ts         Offline command kinds with Jev; jev-label.ts is bun run jev
   cli.ts         CLI for hall-pass-init
   install.ts     Registers hooks in ~/.claude/settings.json (--codex: ~/.codex/hooks.json)
   uninstall.ts   Removes hooks (--codex for Codex)
