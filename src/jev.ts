@@ -274,9 +274,14 @@ export async function askJev(item: Item, key: string, opts: { fetchImpl?: typeof
   }
 }
 
-/** Rough input tokens for one request: about four characters a token. */
+/**
+ * Rough input tokens for one request. Jev bills about one token per two
+ * characters of the request: the first full run (2026-10-04) sent 7,303
+ * requests, estimated at 2.05M tokens by four characters a token, and was
+ * billed 4.18M.
+ */
 export function estimateTokens(item: Item): number {
-  return Math.ceil(JSON.stringify(buildRequest(item.state)).length / 4)
+  return Math.ceil(JSON.stringify(buildRequest(item.state)).length / 2)
 }
 
 // ── The report ───────────────────────────────────────

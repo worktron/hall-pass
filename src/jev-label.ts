@@ -103,10 +103,16 @@ function printReport(report: Report) {
   }
 
   console.log(`\nPossible holes: allowed today, Jev reads as delete, remote, credentials or system (${report.holes.length}):`)
-  for (const { item, answer } of report.holes.slice(0, 60)) {
-    console.log(`  ${answer.kind.padEnd(11)} ${answer.confidence.toFixed(2)}  ${String(item.uses).padStart(4)}x  ${short(item.state.command)}`)
+  // By name and subcommand: most holes are one rule seen many times.
+  const groups = [...Map.groupBy(report.holes, (h) => h.item.group)]
+    .map(([group, hs]) => ({ group, hs, uses: hs.reduce((n, h) => n + h.item.uses, 0) }))
+    .sort((a, b) => b.uses - a.uses || a.group.localeCompare(b.group))
+  for (const { group, hs, uses } of groups) {
+    const tallied: Partial<Record<Kind, number>> = {}
+    for (const h of hs) tallied[h.answer.kind] = (tallied[h.answer.kind] ?? 0) + 1
+    console.log(`  ${group.padEnd(28)} ${String(uses).padStart(5)} uses, ${hs.length} distinct  [${kinds(tallied)}]`)
+    for (const h of hs.slice(0, 2)) console.log(`      ${short(h.item.state.command)}`)
   }
-  if (report.holes.length > 60) console.log(`  … ${report.holes.length - 60} more`)
 
   console.log(`\nJudgment calls, by today's reason: how Jev reads them, and the ones it reads as inspect or build:`)
   for (const j of report.judgment) {
