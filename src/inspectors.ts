@@ -20,6 +20,15 @@ export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 const allow = (reason: string): EvalResult => ({ decision: "allow", reason })
 const prompt = (reason: string, message: string): EvalResult => ({ decision: "prompt", reason, message })
 
+/** pkill and killall: a judgment call, unless the words only list signals or ask for help. */
+function killByPattern(cmdInfo: CommandInfo): EvalResult {
+  const rest = cmdInfo.args.slice(1)
+  if (rest.length > 0 && rest.every((a) => ["-l", "--list", "-V", "--version", "-h", "--help"].includes(a))) {
+    return allow(`${cmdInfo.name}: lists only`)
+  }
+  return prompt(`${cmdInfo.name}: kills by pattern`, `"${cmdInfo.name}" stops every process that matches, including ones other sessions started; kill the pid you started instead`)
+}
+
 export const INSPECTORS: Record<string, Inspector> = {
   // -- Version control --
 
@@ -45,6 +54,11 @@ export const INSPECTORS: Record<string, Inspector> = {
       if (arg.startsWith("-")) continue
       // Everything from here is the sub-command + its args
       const subArgs = args.slice(i)
+      // The process ids arrive on stdin, usually from pgrep, ps or lsof: a
+      // kill by pattern, like pkill. `kill $(cat app.pid)` names its own.
+      if (subArgs[0] === "kill") {
+        return prompt("xargs kill: kills the processes piped in", `"xargs kill" stops whichever processes the input names, usually found by a pattern`)
+      }
       const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
       return ctx.evaluate(subCmd)
     }
@@ -301,6 +315,45 @@ export const INSPECTORS: Record<string, Inspector> = {
     return allow("kill: safe")
   },
 
+  // A kill by pattern stops every match, including processes another
+  // session started. Listing signals or asking for help kills nothing.
+  pkill: (cmdInfo) => killByPattern(cmdInfo),
+  killall: (cmdInfo) => killByPattern(cmdInfo),
+
+  "ssh-keygen": (cmdInfo, ctx) => {
+    // The key files it writes or reads (-f, the CA key -s, and the files a
+    // CA signs) go through the protected paths, as cp's do: ~/.ssh is one.
+    // getopt rules: in a cluster like `-lf<path>`, the first option that
+    // takes a value takes the rest of the word, or else the next word.
+    const takesValue = new Set("abCDEFfGIJjKmMNnOPRrSstVwYZz")
+    const args = cmdInfo.args
+    const paths: string[] = []
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
+      if (!arg.startsWith("-") || arg === "-") {
+        paths.push(arg)
+        continue
+      }
+      for (let j = 1; j < arg.length; j++) {
+        const option = arg[j]!
+        if (!takesValue.has(option)) continue
+        const value = j + 1 < arg.length ? arg.slice(j + 1) : args[++i]
+        if ((option === "f" || option === "s") && value !== undefined) paths.push(value)
+        break
+      }
+    }
+    for (const path of paths) {
+      if (ctx.strictPlaceholders && path.includes("$")) {
+        return { decision: "prompt", reason: `ssh-keygen: key path held in a variable`, message: `"ssh-keygen" key file is held in a variable hall-pass cannot read (${path})`, unreadable: true }
+      }
+      const decision = checkFilePath(path, "write", ctx.config)
+      if (!decision.allowed) {
+        return { decision: "prompt", reason: `path-blocked: ssh-keygen ${decision.reason}`, message: `"ssh-keygen" targets ${decision.reason}`, hard: true }
+      }
+    }
+    return allow("ssh-keygen: no protected path")
+  },
+
   chmod: (cmdInfo) => {
     const args = cmdInfo.args
     for (let i = 1; i < args.length; i++) {
@@ -555,6 +608,21 @@ export const INSPECTORS: Record<string, Inspector> = {
       "login", "logout", "docs", "shell", "open",
       "list",
     ])
+    // `railway variables` lists, but also sets and deletes: `--set K=V`,
+    // `--set-from-stdin K`, and the `set` and `delete` subcommands it shares
+    // with `railway variable`. Only listing is safe.
+    if (subcmd === "variables") {
+      const rest = args.slice(subcmdIdx + 1)
+      for (let i = 0; i < rest.length; i++) {
+        const arg = rest[i]!
+        if (arg === "-s" || arg === "--service" || arg === "-e" || arg === "--environment") { i++; continue }
+        if (/^--set(-from-stdin)?(=|$)/.test(arg)) return prompt("railway: variables --set", `"railway variables ${arg.split("=")[0]}" changes a deployed service's variables`)
+        if (arg.startsWith("-")) continue
+        if (arg !== "list" && arg !== "help") return prompt(`railway: variables ${arg}`, `"railway variables ${arg}" changes a deployed service's variables`)
+        break
+      }
+      return allow("railway: variables")
+    }
     if (safeCmds.has(subcmd)) return allow(`railway: ${subcmd}`)
 
     // `railway run` proxies another command — evaluate the inner command

@@ -127,7 +127,6 @@ describe("hook integration", () => {
       "git add . && git commit -m 'msg' && git push",
       "grep -r foo /path | head -20",
       "TEST_URL=http://localhost:3334 bun test server/",
-      "lsof -ti :3334 | xargs kill",
       "for f in *.ts; do echo $f; done",
       "curl https://example.com | jq .data | sort | head -5",
       "bun run db:generate search-index 2>&1",
@@ -199,6 +198,9 @@ describe("hook integration", () => {
       "dd if=/dev/zero of=disk.img",
       "echo $(rm -rf /)",
       "safe-looking | rm -rf /tmp",
+      // Kills by pattern or by port stop whatever matches, another session's server included.
+      "lsof -ti :3334 | xargs kill",
+      "pkill -f vite",
     ]
 
     for (const cmd of prompted) {

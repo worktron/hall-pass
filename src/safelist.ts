@@ -27,7 +27,7 @@ export const SAFE_COMMANDS = new Set([
 
   // ── Process management ───────────────────────────────────────────────
   "lsof", "ps", "pgrep", "top",
-  "sleep", "pkill", "killall",
+  "sleep",
   "wait", "disown", "jobs",
 
   // ── Network & DNS ────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ export const SAFE_COMMANDS = new Set([
   "tesseract",
 
   // ── Security & certificates ──────────────────────────────────────────
-  "ssh-add", "ssh-keygen",
+  "ssh-add",
 
   // ── Container tools ──────────────────────────────────────────────────
   "docker-compose",
