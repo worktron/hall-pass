@@ -310,8 +310,11 @@ describe("evaluateBashCommand", () => {
         expectPrompt(cmd("sed", "-i", "", "s/a/b/", "ok.ts", "/home/u/.ssh/config"), protectedCtx)
       })
 
-      test("read-only sed on a protected path is still fine", () => {
-        expectAllow(cmd("sed", "-n", "1,5p", "/home/u/.ssh/config"), protectedCtx)
+      test("read-only sed on a protected path stops, as cat does: it prints the file", () => {
+        const result = evaluateBashCommand(cmd("sed", "-n", "1,5p", "/home/u/.ssh/config"), protectedCtx)
+        expect(result).toMatchObject({ decision: "prompt", hard: true })
+        expectAllow(cmd("sed", "-n", "1,5p", "src/app.ts"), protectedCtx)
+        expectAllow(cmd("sed", "-n", "s/secret/x/p", "src/app.ts"), protectedCtx)
       })
     })
 

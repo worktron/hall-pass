@@ -262,7 +262,16 @@ export const INSPECTORS: Record<string, Inspector> = {
   sed: (cmdInfo, ctx) => {
     // sed only writes with in-place editing. Without it, nothing to check.
     const parsed = parseSedArgs(cmdInfo.args)
-    if (!parsed.inPlace) return allow("sed: read-only")
+    if (!parsed.inPlace) {
+      // Reading prints the file: a protected one stops here as it would for cat.
+      for (const file of parsed.operands) {
+        const decision = checkFilePath(file, "read", ctx.config)
+        if (!decision.allowed) {
+          return { decision: "prompt", reason: `path-blocked: sed ${decision.reason}`, message: `"sed" reads ${decision.reason}`, hard: true }
+        }
+      }
+      return allow("sed: read-only")
+    }
 
     // "sed -i" does what the Edit tool does, so it gets the same two checks
     // Edit gets in decide.ts: the target path, then the content for secrets.
@@ -1207,6 +1216,8 @@ interface SedParse {
   scripts: string[]
   /** File operands the edit would rewrite. */
   files: string[]
+  /** Every file operand, globs and variables included: what a plain sed reads. */
+  operands: string[]
   /** Set when the arguments could not be resolved confidently — fail closed. */
   uncertain: boolean
 }
@@ -1229,7 +1240,7 @@ const SED_VALUE_LETTERS = new Set(["e", "f"])
  * place and all slipped through.
  */
 function parseSedArgs(args: string[]): SedParse {
-  const out: SedParse = { inPlace: false, scripts: [], files: [], uncertain: false }
+  const out: SedParse = { inPlace: false, scripts: [], files: [], operands: [], uncertain: false }
   const positionals: string[] = []
   let sawScriptFlag = false   // -e or -f given, so every positional is a file
 
@@ -1314,6 +1325,8 @@ function parseSedArgs(args: string[]): SedParse {
     }
     out.scripts.push(script)
   }
+
+  out.operands = [...positionals]
 
   // A file operand only tells us what gets rewritten if it names a real path.
   // find's "{}" placeholder, an unexpanded glob, or a shell variable could each

@@ -305,6 +305,41 @@ describe("adversarial: dangerous flag variants", () => {
     }
   })
 
+  describe("should PROMPT — readers of protected files", () => {
+    const prompted = [
+      "grep -r key ~/.ssh",
+      "jq -r .user.accessToken ~/.railway/config.json",
+      "sed -n 1p ~/.ssh/id_rsa",
+      "awk 1 ~/.ssh/id_rsa",
+      "base64 ~/.ssh/id_rsa",
+      "tar czf /tmp/x.tgz ~/.ssh",
+      "cp -r ~/.aws /tmp/aws",
+      "f=~/.ssh/id_rsa; grep x $f",
+      "K=~/.aws/credentials && sort $K",
+    ]
+
+    for (const cmd of prompted) {
+      test(cmd, async () => {
+        expectPrompt(await runHook(cmd))
+      })
+    }
+  })
+
+  describe("should ALLOW — readers fed by loops and lists", () => {
+    const allowed = [
+      "for f in src/*.ts; do grep -c TODO $f; done",
+      "grep -n foo $(git ls-files)",
+      "grep -n 'api/secret' src/app.ts",
+      "jq -r .name package.json",
+    ]
+
+    for (const cmd of allowed) {
+      test(cmd, async () => {
+        expectAllow(await runHook(cmd))
+      })
+    }
+  })
+
   describe("should PROMPT — dangerous kill targets", () => {
     const prompted = [
       "kill -9 1",

@@ -1,5 +1,5 @@
 import { describe, test, expect } from "bun:test"
-import { checkFilePath, checkCommandPaths } from "./paths.ts"
+import { checkFilePath, checkCommandPaths, isPathAwareCommand } from "./paths.ts"
 import type { HallPassConfig } from "./config.ts"
 import type { CommandInfo } from "./parser.ts"
 import { homedir } from "os"
@@ -174,5 +174,72 @@ describe("checkCommandPaths", () => {
     const cmd: CommandInfo = { assigns: [], name: "cp", args: ["cp", "./.env", "/tmp/backup"] }
 
     expect(checkCommandPaths(cmd, config).allowed).toBe(false)
+  })
+})
+
+describe("readers honor protected paths", () => {
+  const config = makeConfig({ protected: ["~/.ssh/**", "~/.aws/**", "**/secret*"] })
+  const blocked = (...args: string[]) => checkCommandPaths({ assigns: [], name: args[0]!, args }, config).allowed === false
+
+  test("every reader that prints a file is path-aware", () => {
+    for (const name of ["grep", "rg", "jq", "awk", "base64", "sort", "cut", "tar", "zip", "nl"]) {
+      expect(isPathAwareCommand(name)).toBe(true)
+    }
+  })
+
+  test("a reader given a protected file stops, as cat does", () => {
+    expect(blocked("grep", "x", "~/.ssh/id_rsa")).toBe(true)
+    expect(blocked("jq", ".", "~/.aws/credentials")).toBe(true)
+    expect(blocked("awk", "1", "~/.ssh/id_rsa")).toBe(true)
+    expect(blocked("base64", "~/.ssh/id_rsa")).toBe(true)
+    expect(blocked("base64", "-i", "~/.ssh/id_rsa", "-o", "/tmp/k")).toBe(true)
+    expect(blocked("sort", "~/.ssh/known_hosts")).toBe(true)
+    expect(blocked("rg", "key", "~/.ssh")).toBe(true)
+  })
+
+  test("the directory a dir/** pattern protects is protected too", () => {
+    expect(checkFilePath("~/.ssh", "read", config).allowed).toBe(false)
+    expect(checkFilePath("~/.ssh/", "read", config).allowed).toBe(false)
+    expect(blocked("tar", "czf", "/tmp/x.tgz", "~/.ssh")).toBe(true)
+    expect(blocked("grep", "-r", "key", "~/.aws")).toBe(true)
+    expect(checkFilePath("~/.sshfoo", "read", config).allowed).toBe(true)
+    expect(checkFilePath("~/Workspace", "read", config).allowed).toBe(true)
+  })
+
+  test("the pattern or program is not a path", () => {
+    expect(blocked("grep", "-n", "api/secret", "src/app.ts")).toBe(false)
+    expect(blocked("grep", "-A", "3", "api/secret", "src/app.ts")).toBe(false)
+    expect(blocked("rg", "-g", "*.ts", "api/secret", "src/")).toBe(false)
+    expect(blocked("awk", "-F", "/", "{print $2}", "data/a.txt")).toBe(false)
+    expect(blocked("jq", "-r", ".a/secret", "data/a.json")).toBe(false)
+    expect(blocked("jq", "--arg", "k", "./secret", ".x", "data/a.json")).toBe(false)
+  })
+
+  test("with -e or -f the pattern comes from the option, so every operand is a file", () => {
+    expect(blocked("grep", "-e", "x", "./secret.txt")).toBe(true)
+    expect(blocked("grep", "-rne", "x", "./secret.txt")).toBe(true)
+    expect(blocked("grep", "--regexp=x", "./secret.txt")).toBe(true)
+    expect(blocked("awk", "-f", "prog.awk", "./secret.txt")).toBe(true)
+    expect(blocked("rg", "--files", "~/.ssh")).toBe(true)
+  })
+
+  test("a pattern or program file is read too", () => {
+    expect(blocked("grep", "-f", "~/.ssh/id_rsa", "notes.txt")).toBe(true)
+    expect(blocked("grep", "-f~/.ssh/id_rsa", "notes.txt")).toBe(true)
+    expect(blocked("jq", "--rawfile", "k", "~/.ssh/id_rsa", "-n", "$k")).toBe(true)
+    expect(blocked("jq", "-f", "~/.ssh/prog.jq", "a.json")).toBe(true)
+  })
+
+  test("jq --args turns the rest into strings, not files", () => {
+    expect(blocked("jq", "-n", "$ARGS", "--args", "./secret")).toBe(false)
+  })
+})
+
+describe("default protected paths", () => {
+  test("Railway's token file is protected", async () => {
+    const { DEFAULT_PROTECTED_PATHS } = await import("./config.ts")
+    const config = makeConfig({ protected: DEFAULT_PROTECTED_PATHS })
+    expect(checkFilePath("~/.railway/config.json", "read", config).allowed).toBe(false)
+    expect(checkCommandPaths({ assigns: [], name: "jq", args: ["jq", "-r", ".user.accessToken", "~/.railway/config.json"] }, config).allowed).toBe(false)
   })
 })
