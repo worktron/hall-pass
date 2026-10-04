@@ -104,7 +104,6 @@ describe("adversarial: indirect execution", () => {
       "docker logs my-container",
       "docker build -t myapp .",
       "xargs echo",
-      "lsof -ti :3334 | xargs kill",
       "kill 12345",
       "chmod 644 file.txt",
       "chmod u+x script.sh",
@@ -310,6 +309,12 @@ describe("adversarial: dangerous flag variants", () => {
     const prompted = [
       "kill -9 1",
       "kill -9 -1",
+      // By pattern or by port: every match goes, whoever started it.
+      "pkill -f vite",
+      "killall node",
+      "lsof -ti :3334 | xargs kill",
+      "pgrep -f vite | xargs kill -9",
+      "ps aux | grep vite | awk '{print $2}' | xargs kill",
     ]
 
     for (const cmd of prompted) {

@@ -55,8 +55,10 @@ describe("evaluateBashCommand", () => {
       expectAllow(cmd("xargs", "grep", "-l", "foo"))
     })
 
-    test("xargs kill → allow (kill inspector sees no dangerous PIDs)", () => {
-      expectAllow(cmd("xargs", "kill"))
+    test("xargs kill → prompt (the pids are piped in, usually by a pattern)", () => {
+      expectPrompt(cmd("xargs", "kill"))
+      expectPrompt(cmd("xargs", "-n1", "kill"))
+      expectPrompt(cmd("xargs", "-I", "{}", "kill", "-9", "{}"))
     })
 
     test("xargs rm → prompt", () => {
@@ -410,6 +412,53 @@ describe("evaluateBashCommand", () => {
 
     test("kill 1 → prompt", () => {
       expectPrompt(cmd("kill", "1"))
+    })
+  })
+
+  describe("pkill and killall", () => {
+    test("a kill by pattern is a judgment call", () => {
+      const result = evaluateBashCommand(cmd("pkill", "-f", "vite"), makeCtx())
+      expect(result).toMatchObject({ decision: "prompt", reason: "pkill: kills by pattern" })
+      expect((result as { hard?: boolean }).hard).toBeFalsy()
+      expectPrompt(cmd("pkill", "node"))
+      expectPrompt(cmd("killall", "node"))
+      expectPrompt(cmd("killall", "-9", "Beeline"))
+    })
+
+    test("listing signals or asking for help kills nothing", () => {
+      expectAllow(cmd("killall", "-l"))
+      expectAllow(cmd("pkill", "--help"))
+      expectAllow(cmd("pkill", "-V"))
+    })
+  })
+
+  describe("ssh-keygen", () => {
+    test("a key file under ~/.ssh is a protected path, in every spelling", () => {
+      const ctx = makeProtectedCtx()
+      for (const args of [
+        ["-t", "ed25519", "-N", "", "-C", "me@m5", "-f", "~/.ssh/id_new"],
+        ["-f~/.ssh/id_new"],
+        ["-lf", "~/.ssh/id_ed25519.pub"],
+        ["-yf~/.ssh/id_ed25519"],
+        ["-s", "~/.ssh/ca", "-I", "me", "user.pub"],
+      ]) {
+        const result = evaluateBashCommand(cmd("ssh-keygen", ...args), ctx)
+        expect(result).toMatchObject({ decision: "prompt", hard: true })
+      }
+    })
+
+    test("keys outside protected paths, and options that are not paths, are fine", () => {
+      const ctx = makeProtectedCtx()
+      expectAllow(cmd("ssh-keygen", "-t", "ed25519", "-N", "", "-f", "/tmp/test-key"), ctx)
+      expectAllow(cmd("ssh-keygen", "-t", "ed25519", "-C", "~/.ssh/not-a-path-but-a-comment", "-f", "/tmp/k"), ctx)
+      expectAllow(cmd("ssh-keygen", "-F", "github.com"), ctx)
+      expectAllow(cmd("ssh-keygen", "-t", "ed25519"), ctx)
+    })
+
+    test("a key path held in a variable is a judgment call under strict placeholders", () => {
+      const ctx = makeProtectedCtx()
+      const strict: EvalContext = { ...ctx, strictPlaceholders: true }
+      expect(evaluateBashCommand(cmd("ssh-keygen", "-f", "$KEY"), strict)).toMatchObject({ decision: "prompt", unreadable: true })
     })
   })
 
@@ -929,6 +978,20 @@ describe("evaluateBashCommand", () => {
 
     test("railway variables → allow", () => {
       expectAllow(cmd("railway", "variables"))
+    })
+
+    test("railway variables listing → allow", () => {
+      expectAllow(cmd("railway", "variables", "--service", "Postgres", "--json"))
+      expectAllow(cmd("railway", "variables", "-s", "timescale", "--kv"))
+      expectAllow(cmd("railway", "variables", "list"))
+    })
+
+    test("railway variables that set or delete → prompt", () => {
+      expectPrompt(cmd("railway", "variables", "-s", "timescale", "--skip-deploys", "--set", "PORT=8080"))
+      expectPrompt(cmd("railway", "variables", "--set=PORT=8080"))
+      expectPrompt(cmd("railway", "variables", "--set-from-stdin", "TOKEN"))
+      expectPrompt(cmd("railway", "variables", "delete", "DIGEST_SCHEDULER"))
+      expectPrompt(cmd("railway", "variables", "set", "A=1"))
     })
 
     test("railway init → allow", () => {
