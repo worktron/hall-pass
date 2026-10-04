@@ -43,6 +43,8 @@ export const DEFAULT_PROTECTED_PATHS = [
   "~/.gnupg/**",
   "**/*.pem",
   "**/*id_rsa*",
+  // Railway's CLI keeps its account token here, in plain JSON.
+  "~/.railway/config.json",
 ];
 
 /** Default read-only path patterns — reads allowed, writes/deletes blocked. */
