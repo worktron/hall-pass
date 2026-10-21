@@ -8,7 +8,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { resolve } from "path"
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "fs"
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 
 const INSTALL = resolve(import.meta.dir, "install.ts")
@@ -36,7 +36,9 @@ function hookCommands(path: string): string[] {
 
 function scratchHome(): { home: string; env: Record<string, string | undefined> } {
   const home = mkdtempSync(resolve(tmpdir(), "hall-pass-install-"))
-  return { home, env: { HOME: home, CLAUDE_CONFIG_DIR: undefined } }
+  // BUN_INSTALL too: setup runs `bun link`, which must not repoint the
+  // machine's real `hall-pass` command at this checkout.
+  return { home, env: { HOME: home, CLAUDE_CONFIG_DIR: undefined, BUN_INSTALL: resolve(home, ".bun") } }
 }
 
 describe("setup honors CLAUDE_CONFIG_DIR", () => {
@@ -74,6 +76,23 @@ describe("setup honors CLAUDE_CONFIG_DIR", () => {
     expect(r.exitCode).toBe(0)
     expect(existsSync(resolve(home, ".codex", "hooks.json"))).toBe(true)
     expect(existsSync(resolve(account, "settings.json"))).toBe(false)
+  })
+})
+
+describe("setup puts the hall-pass command on the PATH", () => {
+  test("the linked command's codex-hook prints what setup --codex registers, naming the real checkout", async () => {
+    const { home, env } = scratchHome()
+    const r = await run(INSTALL, env, ["--codex"])
+    expect(r.exitCode).toBe(0)
+    const linked = resolve(home, ".bun", "bin", "hall-pass")
+    expect(existsSync(linked)).toBe(true)
+
+    const printed = await run(linked, env, ["codex-hook"])
+    expect(printed.exitCode).toBe(0)
+    const registered = new Set(hookCommands(resolve(home, ".codex", "hooks.json")))
+    expect([...registered]).toEqual([printed.stdout.trim()])
+    // Through the link, yet the command names the checkout, never bun's bin directory.
+    expect(printed.stdout.trim()).toBe(`bun ${resolve(realpathSync(import.meta.dir), "codex-hook.ts")}`)
   })
 })
 

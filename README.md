@@ -150,6 +150,8 @@ bun run setup
 
 This downloads [shfmt](https://github.com/mvdan/sh) (used to parse Bash commands), registers hooks for Bash, Write, and Edit tools in `~/.claude/settings.json`, and sets up non-Bash tool permissions (Read, Glob, Grep, WebFetch, WebSearch).
 
+Setup also runs `bun link`, which puts the `hall-pass` command on your PATH (in bun's global bin directory), pointing at this checkout.
+
 If you run more than one Claude account via `CLAUDE_CONFIG_DIR`, the hooks are registered in that directory's `settings.json` instead. Run setup once per account, from a session of that account. hall-pass's own config and audit log live in `~/.config/hall-pass/` and are shared by every account.
 
 ### Install for Codex
@@ -262,6 +264,17 @@ When enabled, writes one JSON line per decision to `~/.config/hall-pass/audit.js
 
 Fields: `ts` (ISO 8601), `tool` (Bash/Write/Edit), `input` (command or file path), `decision` (allow/prompt/pass/feedback), `reason` (human-readable; a judgment call handed to the auto-mode classifier is a `pass` with reason `deferred: <what would have prompted>`), `layer` (safelist/git/sql/paths/classifier/unknown), plus `session`, `mode` (Claude Code's permission mode), and `tool_use_id`.
 
+### Asking hall-pass from another program
+
+Programs that want hall-pass's answers ask the `hall-pass` command instead of reading its files:
+
+```bash
+hall-pass decision toolu_01ABC   # {"decision":"prompt","layer":"git","reason":"git: push to protected branch main"}
+hall-pass codex-hook             # bun /path/to/hall-pass/src/codex-hook.ts
+```
+
+`decision` prints the last decision recorded for that tool call, from the live audit log or its newest archive. An id it has no decision for exits 1 with nothing on stdout; a missing id exits 2. `codex-hook` prints the command `bun run setup:codex` registers, for a program that writes a Codex hooks file of its own.
+
 ## How the hook decides
 
 ```
@@ -321,7 +334,8 @@ src/
   stats.ts       Audit log report (bun run stats)
   eval.ts        Replay the audit log through decide() (bun run eval)
   jev.ts         Offline command kinds with Jev; jev-label.ts is bun run jev
-  cli.ts         CLI for hall-pass-init
+  cli.ts         The hall-pass command: init, decision, codex-hook
+  hook-command.ts  The command a host registers to run the hook
   install.ts     Registers hooks in ~/.claude/settings.json (--codex: ~/.codex/hooks.json)
   uninstall.ts   Removes hooks (--codex for Codex)
   *.test.ts      Tests

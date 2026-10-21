@@ -6,6 +6,7 @@
   "type": "module",
   "private": false,
   "bin": {
+    "hall-pass": "./src/cli.ts",
     "hall-pass-install": "./src/install.ts",
     "hall-pass-uninstall": "./src/uninstall.ts",
     "hall-pass-init": "./src/cli.ts"

@@ -17,11 +17,15 @@
  *    Codex asks you to review and trust a new hook definition on first use:
  *    run `/hooks` inside Codex after installing.
  *
+ * Either way it also runs `bun link`, putting the `hall-pass` command
+ * (cli.ts) on the PATH, pointing at this checkout.
+ *
  * --init — also writes a default ~/.config/hall-pass/config.toml.
  */
 
 import { resolve } from "path"
 import { homedir } from "os"
+import { hookCommand } from "./hook-command.ts"
 
 const CODEX = process.argv.includes("--codex")
 
@@ -33,11 +37,10 @@ const CODEX = process.argv.includes("--codex")
  */
 const CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || resolve(homedir(), ".claude")
 
-const HOOK_PATH = resolve(import.meta.dir, CODEX ? "codex-hook.ts" : "hook.ts")
 const SETTINGS_PATH = CODEX
   ? resolve(homedir(), ".codex", "hooks.json")
   : resolve(CLAUDE_CONFIG_DIR, "settings.json")
-const HOOK_COMMAND = `bun ${HOOK_PATH}`
+const HOOK_COMMAND = hookCommand(CODEX ? "codex" : "claude")
 
 const NON_BASH_TOOLS = ["Read", "Edit", "Glob", "Grep", "WebFetch", "WebSearch"]
 const HOOK_MATCHERS = ["Bash", "Write", "Edit"]
@@ -172,6 +175,18 @@ if (process.argv.includes("--init")) {
 
 await Bun.write(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n")
 console.log("Wrote settings to", SETTINGS_PATH)
+
+// -- Put the `hall-pass` command on the PATH --
+// `bun link` links this checkout's bins into bun's global bin directory, so
+// other programs ask `hall-pass decision` / `hall-pass codex-hook` instead of
+// reading hall-pass's files. The link follows the checkout, as the hooks do.
+
+const link = Bun.spawnSync(["bun", "link"], { cwd: resolve(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe" })
+if (link.exitCode === 0) {
+  console.log("Linked the hall-pass command onto the PATH (bun link)")
+} else {
+  console.error("Could not link the hall-pass command (bun link):", link.stderr.toString().trim())
+}
 if (CODEX) {
   console.log("\nDone. Codex skips a new or changed hook until you trust it:")
   console.log("open a Codex session and run /hooks to review and trust the hall-pass hooks.")
