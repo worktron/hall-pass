@@ -63,15 +63,7 @@ export interface AuditLogger {
  * malformed lines are skipped.
  */
 export function readAuditLog(path: string): AuditEntry[] {
-  const base = basename(path)
-  let files: string[] = []
-  try {
-    files = readdirSync(dirname(path))
-      .filter((f) => f.startsWith(`${base}.`))
-      .sort()
-      .map((f) => resolve(dirname(path), f))
-  } catch {}
-  files.push(path)
+  const files = [...auditArchives(path), path]
 
   const entries: AuditEntry[] = []
   for (const file of files) {
@@ -89,6 +81,60 @@ export function readAuditLog(path: string): AuditEntry[] {
     }
   }
   return entries
+}
+
+/** Rotated archives beside the live log, oldest first. */
+function auditArchives(path: string): string[] {
+  const base = basename(path)
+  try {
+    return readdirSync(dirname(path))
+      .filter((f) => f.startsWith(`${base}.`))
+      .sort()
+      .map((f) => resolve(dirname(path), f))
+  } catch {
+    return []
+  }
+}
+
+export interface FoundDecision {
+  decision: string
+  layer: string | null
+  reason: string | null
+}
+
+/**
+ * The decision hall-pass made for one tool call, for `hall-pass decision`
+ * (cli.ts): what other programs ask instead of reading this log themselves.
+ *
+ * The LAST decision line for the id wins: the hook judges a call at
+ * PreToolUse and, under Codex, again at PermissionRequest, and the later
+ * verdict is the one that settled it. Only the live log and the newest
+ * archive are read — that covers a rotation between the decision and the
+ * question, while a miss (a common answer) stays one file read rather than
+ * the whole history.
+ */
+export function findDecision(path: string, toolUseId: string): FoundDecision | null {
+  const newestArchive = auditArchives(path).at(-1)
+  const needle = `"tool_use_id":${JSON.stringify(toolUseId)}`
+  for (const file of newestArchive ? [path, newestArchive] : [path]) {
+    let text: string
+    try {
+      text = readFileSync(file, "utf8")
+    } catch {
+      continue
+    }
+    const lines = text.split("\n")
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]!
+      if (!line.includes(needle)) continue
+      try {
+        const entry = JSON.parse(line) as AuditEntry
+        if (entry.event !== "decision" || entry.tool_use_id !== toolUseId || typeof entry.decision !== "string") continue
+        return { decision: entry.decision, layer: entry.layer ?? null, reason: entry.reason ?? null }
+      } catch {}
+    }
+  }
+  return null
 }
 
 export function createAudit(config: HallPassConfig, ctx: AuditContext = {}): AuditLogger {

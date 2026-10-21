@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test"
-import { createAudit, readAuditLog, AUDIT_MAX_BYTES } from "./audit.ts"
+import { createAudit, findDecision, readAuditLog, AUDIT_MAX_BYTES } from "./audit.ts"
 import { readdirSync, writeFileSync } from "fs"
 import type { HallPassConfig } from "./config.ts"
 import { resolve } from "path"
@@ -240,5 +240,55 @@ describe("audit", () => {
 
     const file = Bun.file(auditPath)
     expect(await file.exists()).toBe(true)
+  })
+})
+
+describe("findDecision", () => {
+  let tmpDir: string
+
+  beforeEach(async () => {
+    tmpDir = await mkdtemp(resolve(tmpdir(), "hall-pass-find-"))
+  })
+
+  afterEach(async () => {
+    await rm(tmpDir, { recursive: true, force: true })
+  })
+
+  const line = (fields: Record<string, unknown>) =>
+    JSON.stringify({ ts: "2026-10-21T00:00:00.000Z", event: "decision", tool: "Bash", input: "x", ...fields }) + "\n"
+
+  test("prints the last decision for a tool_use_id, with its layer and reason", () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    writeFileSync(
+      auditPath,
+      line({ tool_use_id: "toolu_a", decision: "allow", reason: "all commands safe", layer: "evaluate" }) +
+        line({ tool_use_id: "toolu_b", decision: "allow", reason: "other call", layer: "evaluate" }) +
+        JSON.stringify({ ts: "2026-10-21T00:00:01.000Z", event: "completed", tool_use_id: "toolu_a" }) + "\n" +
+        line({ tool_use_id: "toolu_a", decision: "prompt", reason: "push to protected branch main", layer: "git" }),
+    )
+    expect(findDecision(auditPath, "toolu_a")).toEqual({ decision: "prompt", layer: "git", reason: "push to protected branch main" })
+  })
+
+  test("finds an id in the newest archive, but not in older ones", () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    writeFileSync(resolve(tmpDir, "audit.jsonl.2026-10-01T00-00-00-000Z"), line({ tool_use_id: "toolu_old", decision: "allow", reason: "r", layer: "l" }))
+    writeFileSync(resolve(tmpDir, "audit.jsonl.2026-10-20T00-00-00-000Z"), line({ tool_use_id: "toolu_rotated", decision: "block", reason: "secret", layer: "secrets" }))
+    writeFileSync(auditPath, line({ tool_use_id: "toolu_live", decision: "allow", reason: "r", layer: "l" }))
+    expect(findDecision(auditPath, "toolu_rotated")).toEqual({ decision: "block", layer: "secrets", reason: "secret" })
+    expect(findDecision(auditPath, "toolu_old")).toBeNull()
+  })
+
+  test("an unknown id, a non-decision line, or a missing log finds nothing", () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    writeFileSync(auditPath, JSON.stringify({ ts: "t", event: "native-prompt", tool_use_id: "toolu_n" }) + "\nnot json\n")
+    expect(findDecision(auditPath, "toolu_n")).toBeNull()
+    expect(findDecision(auditPath, "toolu_missing")).toBeNull()
+    expect(findDecision(resolve(tmpDir, "nope", "audit.jsonl"), "toolu_n")).toBeNull()
+  })
+
+  test("a line without a layer or reason reads as null for them", () => {
+    const auditPath = resolve(tmpDir, "audit.jsonl")
+    writeFileSync(auditPath, JSON.stringify({ ts: "t", event: "decision", tool_use_id: "toolu_p", decision: "pass" }) + "\n")
+    expect(findDecision(auditPath, "toolu_p")).toEqual({ decision: "pass", layer: null, reason: null })
   })
 })
