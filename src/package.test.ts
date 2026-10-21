@@ -49,4 +49,8 @@ describe("package.json scripts", () => {
     expect(pkg.bin?.["hall-pass-install"]).toBe("./src/install.ts")
     expect(pkg.bin?.["hall-pass-uninstall"]).toBe("./src/uninstall.ts")
   })
+
+  test("hall-pass-init runs init, not the bare hall-pass command, which only prints the usage", () => {
+    expect(pkg.bin?.["hall-pass-init"]).toBe("./src/init.ts")
+  })
 })

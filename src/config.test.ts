@@ -297,10 +297,20 @@ describe("initConfig", () => {
     process.env.HALL_PASS_CONFIG = configPath;
     const result = await initConfig();
 
-    expect(result).toBe(configPath);
+    expect(result).toEqual({ path: configPath, created: true });
     const file = Bun.file(configPath);
     expect(await file.exists()).toBe(true);
     const content = await file.text();
     expect(content).toContain("[commands]");
+  });
+
+  test("leaves an existing config's bytes unchanged and reports it was not created", async () => {
+    const configPath = resolve(tmpDir, "config.toml");
+    const mine = '[commands]\nsafe_scripts = ["~/my-script.sh"]\n';
+    await writeFile(configPath, mine);
+    process.env.HALL_PASS_CONFIG = configPath;
+
+    expect(await initConfig()).toEqual({ path: configPath, created: false });
+    expect(await Bun.file(configPath).text()).toBe(mine);
   });
 });

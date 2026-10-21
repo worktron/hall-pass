@@ -9,7 +9,7 @@
     "hall-pass": "./src/cli.ts",
     "hall-pass-install": "./src/install.ts",
     "hall-pass-uninstall": "./src/uninstall.ts",
-    "hall-pass-init": "./src/cli.ts"
+    "hall-pass-init": "./src/init.ts"
   },
   "files": [
     "src/",

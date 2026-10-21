@@ -112,3 +112,29 @@ describe("uninstall honors CLAUDE_CONFIG_DIR", () => {
     expect(hookCommands(resolve(account, "settings.json"))).toEqual([])
   })
 })
+
+describe("setup --init", () => {
+  test("creates the config when none exists", async () => {
+    const { home, env } = scratchHome()
+    const config = resolve(home, ".config", "hall-pass", "config.toml")
+    const r = await run(INSTALL, { ...env, HALL_PASS_CONFIG: config }, ["--init"])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain(`Created default config at ${config}`)
+    expect(readFileSync(config, "utf8")).toContain("[commands]")
+  })
+
+  test("keeps an existing config byte for byte, says so, and still registers the hooks", async () => {
+    const { home, env } = scratchHome()
+    const config = resolve(home, ".config", "hall-pass", "config.toml")
+    const mine = '[commands]\nsafe_scripts = ["~/my-script.sh"]\n'
+    mkdirSync(resolve(config, ".."), { recursive: true })
+    writeFileSync(config, mine)
+
+    const r = await run(INSTALL, { ...env, HALL_PASS_CONFIG: config }, ["--init"])
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain(`Config already exists at ${config}`)
+    expect(r.stdout).toContain(`mv ${config} ${config}.bak`)
+    expect(readFileSync(config, "utf8")).toBe(mine)
+    expect(hookCommands(resolve(home, ".claude", "settings.json")).length).toBeGreaterThan(0)
+  })
+})

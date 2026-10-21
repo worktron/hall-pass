@@ -5,7 +5,7 @@
  * tested in-process in audit.test.ts.
  */
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs"
 import { resolve } from "path"
 import { tmpdir } from "os"
 import { hookCommand } from "./hook-command.ts"
@@ -57,5 +57,69 @@ describe("hall-pass codex-hook", () => {
     expect(r.stdout.trim()).toBe(hookCommand("codex"))
     // What metamax derives today from the registered Claude hook.
     expect(hookCommand("claude").replace(/(^|[/\s])hook\.ts(\s|$)/, "$1codex-hook.ts$2")).toBe(r.stdout.trim())
+  })
+})
+
+// Each init test gets its own config path, so the shared one above (which the
+// decision tests read) is never written and no test depends on another's file.
+const INIT = resolve(import.meta.dir, "init.ts")
+const MINE = '[commands]\nsafe_scripts = ["~/my-script.sh"]\n'
+
+async function spawnWith(entry: string, config: string, ...args: string[]) {
+  const proc = Bun.spawn(["bun", entry, ...args], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env, HALL_PASS_CONFIG: config } })
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
+  return { exitCode: await proc.exited, stdout, stderr }
+}
+
+function scratchConfig(withMine: boolean): string {
+  const path = resolve(mkdtempSync(resolve(dir, "init-")), "config.toml")
+  if (withMine) writeFileSync(path, MINE)
+  return path
+}
+
+describe("bare hall-pass", () => {
+  test("prints the usage and creates no config", async () => {
+    const config = scratchConfig(false)
+    const r = await spawnWith(CLI, config)
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain("Usage: hall-pass")
+    expect(r.stdout).toContain("init")
+    expect(existsSync(config)).toBe(false)
+  })
+
+  test("leaves an existing config's bytes unchanged", async () => {
+    const config = scratchConfig(true)
+    const r = await spawnWith(CLI, config)
+    expect(r.exitCode).toBe(0)
+    expect(readFileSync(config, "utf8")).toBe(MINE)
+  })
+
+  test("--help prints the usage too", async () => {
+    const r = await spawnWith(CLI, scratchConfig(false), "--help")
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain("Usage: hall-pass")
+  })
+})
+
+describe.each([
+  ["hall-pass init", CLI, ["init"]],
+  ["hall-pass-init", INIT, []],
+])("%s", (_name, entry, args) => {
+  test("creates the default config when none exists", async () => {
+    const config = scratchConfig(false)
+    const r = await spawnWith(entry, config, ...args)
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain(`Created default config at ${config}`)
+    expect(readFileSync(config, "utf8")).toContain("[commands]")
+  })
+
+  test("refuses when a config exists: exit 1, names the file and how to replace it, bytes unchanged", async () => {
+    const config = scratchConfig(true)
+    const r = await spawnWith(entry, config, ...args)
+    expect(r.exitCode).toBe(1)
+    expect(r.stdout).toBe("")
+    expect(r.stderr).toContain(`Config already exists at ${config}`)
+    expect(r.stderr).toContain(`mv ${config} ${config}.bak`)
+    expect(readFileSync(config, "utf8")).toBe(MINE)
   })
 })

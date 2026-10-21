@@ -10,6 +10,7 @@ import { parse as parseTOML } from "smol-toml";
 import { homedir } from "os";
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
+import { writeFile } from "fs/promises";
 
 export interface HallPassConfig {
   commands: { safe: string[]; db_clients: string[]; safe_scripts: string[] };
@@ -277,12 +278,26 @@ export function generateDefaultConfig(): string {
 `;
 }
 
-/** Ensure the config directory exists and write the default config. */
-export async function initConfig(): Promise<string> {
+/**
+ * Ensure the config directory exists and write the default config, unless a
+ * config is already there: the "wx" flag makes the existence check and the
+ * write one step, so an existing file is never replaced.
+ */
+export async function initConfig(): Promise<{ path: string; created: boolean }> {
   const configPath = getConfigPath();
   const dir = dirname(configPath);
   await Bun.spawn(["mkdir", "-p", dir]).exited;
 
-  await Bun.write(configPath, generateDefaultConfig());
-  return configPath;
+  try {
+    await writeFile(configPath, generateDefaultConfig(), { flag: "wx" });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "EEXIST") return { path: configPath, created: false };
+    throw err;
+  }
+  return { path: configPath, created: true };
+}
+
+/** What init says when a config already exists: the file, and how to replace it on purpose. */
+export function configExistsMessage(path: string): string {
+  return `Config already exists at ${path}; left unchanged.\nTo replace it with the defaults, move it aside (mv ${path} ${path}.bak) and run hall-pass init again.`;
 }
