@@ -166,9 +166,10 @@ settings.hooks = hooks
 // -- Optionally generate config --
 
 if (process.argv.includes("--init")) {
-  const { initConfig } = await import("./config.ts")
-  const configPath = await initConfig()
-  console.log("Created default config at", configPath)
+  // An existing config is kept, and setup carries on registering hooks.
+  const { configExistsMessage, initConfig } = await import("./config.ts")
+  const { path, created } = await initConfig()
+  console.log(created ? `Created default config at ${path}` : configExistsMessage(path))
 }
 
 // -- Write settings --

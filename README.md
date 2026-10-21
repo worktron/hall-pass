@@ -186,6 +186,8 @@ hall-pass-init
 bun run setup --init
 ```
 
+Neither replaces a config that already exists: both leave it as it is and say how to replace it on purpose (move it aside, then run init again). A bare `hall-pass` only prints the usage.
+
 Config location: `~/.config/hall-pass/config.toml` (override with `HALL_PASS_CONFIG` env var).
 
 ```toml
@@ -334,7 +336,8 @@ src/
   stats.ts       Audit log report (bun run stats)
   eval.ts        Replay the audit log through decide() (bun run eval)
   jev.ts         Offline command kinds with Jev; jev-label.ts is bun run jev
-  cli.ts         The hall-pass command: init, decision, codex-hook
+  cli.ts         The hall-pass command: decision, codex-hook; bare prints the usage
+  init.ts        hall-pass init and hall-pass-init: writes the default config, never over an existing one
   hook-command.ts  The command a host registers to run the hook
   install.ts     Registers hooks in ~/.claude/settings.json (--codex: ~/.codex/hooks.json)
   uninstall.ts   Removes hooks (--codex for Codex)

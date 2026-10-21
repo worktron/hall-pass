@@ -4,7 +4,9 @@
  * hall-pass CLI
  *
  * Subcommands:
- *   init                     — Generate default config at ~/.config/hall-pass/config.toml
+ *   (none), --help, -h, help — Print the usage. Writes nothing.
+ *   init                     — Generate default config at ~/.config/hall-pass/config.toml,
+ *                              only when none exists (src/init.ts).
  *   decision <tool_use_id>   — Print hall-pass's decision for one tool call as JSON:
  *                              {"decision","layer","reason"}. Exit 1, stdout empty, when
  *                              the audit log has no decision for it.
@@ -14,18 +16,24 @@
  * instead of reading its audit log or deriving its file layout themselves.
  */
 
-import { initConfig, loadConfig } from "./config.ts"
+import { loadConfig } from "./config.ts"
 import { findDecision } from "./audit.ts"
 import { hookCommand } from "./hook-command.ts"
+import { runInit } from "./init.ts"
 
-const USAGE = "Usage: hall-pass [init | decision <tool_use_id> | codex-hook]"
+const USAGE = `Usage: hall-pass <command>
+
+  init                     Write the default config to ~/.config/hall-pass/config.toml
+                           (or $HALL_PASS_CONFIG). Never replaces an existing config.
+  decision <tool_use_id>   Print hall-pass's decision for one tool call as JSON.
+  codex-hook               Print the command to register as a Codex hook.`
 
 const [command, ...args] = process.argv.slice(2)
 
-if (command === "init" || !command) {
-  const path = await initConfig()
-  console.log(`Created default config at ${path}`)
-  console.log("Edit this file to customize hall-pass behavior.")
+if (!command || command === "--help" || command === "-h" || command === "help") {
+  console.log(USAGE)
+} else if (command === "init") {
+  process.exit(await runInit())
 } else if (command === "decision") {
   const toolUseId = args[0]
   if (!toolUseId) {
