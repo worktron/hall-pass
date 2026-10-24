@@ -85,6 +85,18 @@ describe("evaluateBashCommand", () => {
       expectPrompt(cmd("xargs", "-n", "1", "--", "rm", "-rf", "/tmp/foo"))
     })
 
+    test("xargs whose input names the command it runs → prompt", () => {
+      expectPrompt(cmd("xargs", "-I", "echo", "echo", "-rf", "/"))
+      expectPrompt(cmd("xargs", "-J", "echo", "echo", "-rf", "/"))
+    })
+
+    test("xargs -I into a shell's -c script: the script still parses and is judged with the input", () => {
+      expectAllow(cmd("xargs", "-I{}", "sh", "-c", "wc -l {}"))
+      expectAllow(cmd("xargs", "-I{}", "sh", "-c", `echo "== {}"; wc -l {}`))
+      expectPrompt(cmd("xargs", "-I{}", "sh", "-c", "rm {}"))
+      expectPrompt(cmd("xargs", "-I{}", "bash", "-ec", "rm -rf /tmp/x/{}"))
+    })
+
     test("xargs flags with values are skipped, not taken for the command", () => {
       expectAllow(cmd("xargs", "-n", "1", "-P", "4", "wc", "-l"))
       expectAllow(cmd("xargs", "-0n1", "wc", "-l"))

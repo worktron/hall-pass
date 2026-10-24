@@ -58,6 +58,18 @@ function parseXargs(args: string[]): { command: string[]; replace?: string; repl
   return null
 }
 
+const SCRIPT_SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash"])
+
+/** Where a shell's `-c` script is in its words (`-c`, or a cluster like `-ec`, takes the next one); -1 when there is none. */
+function shellScriptIndex(args: string[]): number {
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i]!
+    if (!arg.startsWith("-") || arg.startsWith("--")) return -1
+    if (arg.slice(1).includes("c")) return i + 1 < args.length ? i + 1 : -1
+  }
+  return -1
+}
+
 /** pkill and killall: a judgment call, unless the words only list signals or ask for help. */
 function killByPattern(cmdInfo: CommandInfo): EvalResult {
   const rest = cmdInfo.args.slice(1)
@@ -91,19 +103,26 @@ export const INSPECTORS: Record<string, Inspector> = {
     // No command specified — xargs defaults to echo, which is safe
     if (!parsed) return allow("xargs: defaults to echo")
     const { command, replace, replaceWhole } = parsed
+    // A shell's -c script is code: the input goes in double quotes there, so
+    // the script still parses and reads it as one word.
+    const script = SCRIPT_SHELL_NAMES.has(command[0]!.split("/").pop()!) ? shellScriptIndex(command) : -1
+    const input = (i: number) => i === script ? `"${XARGS_INPUT}"` : XARGS_INPUT
+    let subArgs: string[]
+    if (replace !== undefined) {
+      subArgs = replace === "" ? command : command.map((a, i) => a.split(replace).join(input(i)))
+    } else if (replaceWhole !== undefined) {
+      subArgs = command.map((a) => a === replaceWhole ? XARGS_INPUT : a)
+    } else {
+      subArgs = [...command, XARGS_INPUT]
+    }
+    if (subArgs[0] !== command[0]) {
+      return prompt("xargs: command from its input", `"xargs" takes the name of the command it runs from its input`)
+    }
     const name = command[0]!.split("/").pop()!
     // The process ids arrive on stdin, usually from pgrep, ps or lsof: a
     // kill by pattern, like pkill. `kill $(cat app.pid)` names its own.
     if (name === "kill") {
       return prompt("xargs kill: kills the processes piped in", `"xargs kill" stops whichever processes the input names, usually found by a pattern`)
-    }
-    let subArgs: string[]
-    if (replace !== undefined) {
-      subArgs = replace === "" ? command : command.map((a) => a.split(replace).join(XARGS_INPUT))
-    } else if (replaceWhole !== undefined) {
-      subArgs = command.map((a) => a === replaceWhole ? XARGS_INPUT : a)
-    } else {
-      subArgs = [...command, XARGS_INPUT]
     }
     const subCmd: CommandInfo = { name, args: [name, ...subArgs.slice(1)], assigns: [] }
     return ctx.evaluate(subCmd)
