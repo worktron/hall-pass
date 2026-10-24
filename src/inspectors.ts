@@ -11,7 +11,7 @@ import { extractCommandInfos } from "./parser.ts"
 import type { EvalResult, EvalContext } from "./evaluate.ts"
 import { checkGitCommand } from "./git.ts"
 import { DANGEROUS_ENV_VARS } from "./safelist.ts"
-import { checkFilePath } from "./paths.ts"
+import { checkFilePath, XARGS_INPUT } from "./paths.ts"
 import { parseApplyPatch, checkPatch } from "./patch.ts"
 import { scopeOf } from "./places.ts"
 
@@ -19,9 +19,6 @@ export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 
 const allow = (reason: string): EvalResult => ({ decision: "allow", reason })
 const prompt = (reason: string, message: string): EvalResult => ({ decision: "prompt", reason, message })
-
-/** What xargs adds to its command's words at run time, as a value nobody can read. */
-const XARGS_INPUT = "$XARGS_INPUT"
 
 /** xargs flags that take a value, attached (`-I{}`) or as the next argument (BSD and GNU). */
 const XARGS_VALUE_FLAGS = new Set(["I", "J", "L", "n", "P", "d", "s", "a", "R", "E", "S"])
@@ -87,14 +84,17 @@ export const INSPECTORS: Record<string, Inspector> = {
   // -J, in place of the argument that is exactly it. That input stands in the
   // words as XARGS_INPUT, a value nobody can read, so `echo /Users/x | xargs
   // rm -rf /tmp/foo` is judged as the rm it runs, not as `rm -rf /tmp/foo`.
+  // A file command reading the input stays allowed (`find … | xargs wc -l`):
+  // the path check leaves XARGS_INPUT out of its unreadable-variable test.
   xargs: (cmdInfo, ctx) => {
     const parsed = parseXargs(cmdInfo.args)
     // No command specified — xargs defaults to echo, which is safe
     if (!parsed) return allow("xargs: defaults to echo")
     const { command, replace, replaceWhole } = parsed
+    const name = command[0]!.split("/").pop()!
     // The process ids arrive on stdin, usually from pgrep, ps or lsof: a
     // kill by pattern, like pkill. `kill $(cat app.pid)` names its own.
-    if (command[0] === "kill") {
+    if (name === "kill") {
       return prompt("xargs kill: kills the processes piped in", `"xargs kill" stops whichever processes the input names, usually found by a pattern`)
     }
     let subArgs: string[]
@@ -105,12 +105,8 @@ export const INSPECTORS: Record<string, Inspector> = {
     } else {
       subArgs = [...command, XARGS_INPUT]
     }
-    const name = subArgs[0]!.split("/").pop()!
     const subCmd: CommandInfo = { name, args: [name, ...subArgs.slice(1)], assigns: [] }
-    // The input was always unreadable, and `find … | xargs wc -l` was always
-    // allowed: judge it without strictPlaceholders, which would make every
-    // file command that reads the input a judgment call.
-    return ctx.withoutStrictPlaceholders().evaluate(subCmd)
+    return ctx.evaluate(subCmd)
   },
 
   source: () => {

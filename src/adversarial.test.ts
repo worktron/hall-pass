@@ -71,6 +71,10 @@ describe("adversarial: indirect execution", () => {
       "echo Users/someone/x | xargs -itmp rm -rf /tmp/foo",
       "echo Users/someone/x | xargs --replace=tmp rm -rf /tmp/foo",
       "echo /Users/someone/x | xargs -J /tmp/foo rm -rf /tmp/foo",
+      // A variable the line cannot read stays a judgment call inside xargs.
+      "F=$(cat target); echo x | xargs cat $F",
+      "D=$(cat target); ls | xargs -I{} cp {} $D/",
+      "pgrep -f vite | xargs /bin/kill",
       "find / -exec rm -rf {} \\;",
       "find / -execdir rm {} \\;",
       "find . -delete",

@@ -59,6 +59,7 @@ describe("evaluateBashCommand", () => {
       expectPrompt(cmd("xargs", "kill"))
       expectPrompt(cmd("xargs", "-n1", "kill"))
       expectPrompt(cmd("xargs", "-I", "{}", "kill", "-9", "{}"))
+      expectPrompt(cmd("xargs", "/bin/kill"))
     })
 
     test("xargs rm → prompt", () => {
