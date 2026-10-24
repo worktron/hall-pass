@@ -75,6 +75,8 @@ describe("adversarial: indirect execution", () => {
       "F=$(cat target); echo x | xargs cat $F",
       "D=$(cat target); ls | xargs -I{} cp {} $D/",
       "pgrep -f vite | xargs /bin/kill",
+      `XARGS_INPUT=$(cat target); echo x | xargs cat "$XARGS_INPUT"`,
+      "XARGS_INPUT=$(cat target); cp payload $XARGS_INPUT",
       "find / -exec rm -rf {} \\;",
       "find / -execdir rm {} \\;",
       "find . -delete",

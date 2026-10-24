@@ -115,9 +115,11 @@ function getOperationType(commandName: string): "read" | "write" | "delete" {
  * What xargs adds to its command's words at run time (the xargs inspector),
  * as a value nobody can read. A file command reading it was always allowed
  * (`find … | xargs wc -l`), so checkCommandPaths' strict test leaves it out;
- * every other check sees an unreadable `$` value.
+ * every other check sees an unreadable `$` value. The `<` keeps it from
+ * being a variable name, so no word the parser renders (`$NAME`) can pass
+ * for it.
  */
-export const XARGS_INPUT = "$XARGS_INPUT"
+export const XARGS_INPUT = "$<xargs-input>"
 
 /**
  * Check all path-like arguments in a parsed command against protection rules.
