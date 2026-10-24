@@ -14,6 +14,7 @@ import { DANGEROUS_ENV_VARS } from "./safelist.ts"
 import { checkFilePath, XARGS_INPUT } from "./paths.ts"
 import { parseApplyPatch, checkPatch } from "./patch.ts"
 import { scopeOf } from "./places.ts"
+import { unwrapCommand } from "./wrappers.ts"
 
 export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 
@@ -60,6 +61,31 @@ function parseXargs(args: string[]): { command: string[]; replace?: string; repl
 
 const SCRIPT_SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash"])
 
+/**
+ * The words of the command a line finally runs, past `env` (its flags and
+ * assignments) and the transparent wrappers (nohup, nice, timeout, ...), so
+ * `timeout 5 sh -c …` is the sh it starts.
+ */
+function innerWords(words: string[]): string[] {
+  for (;;) {
+    const name = words[0]!.split("/").pop()!
+    if (name === "env") {
+      let i = 1
+      while (i < words.length && (words[i]!.startsWith("-") || words[i]!.includes("="))) {
+        if (words[i] === "-u" || words[i] === "--unset") i++
+        i++
+      }
+      if (i >= words.length) return words
+      words = words.slice(i)
+      continue
+    }
+    const cmdInfo: CommandInfo = { name, args: [name, ...words.slice(1)], assigns: [] }
+    const inner = unwrapCommand(cmdInfo)
+    if (inner === cmdInfo) return words
+    words = inner.args
+  }
+}
+
 /** pkill and killall: a judgment call, unless the words only list signals or ask for help. */
 function killByPattern(cmdInfo: CommandInfo): EvalResult {
   const rest = cmdInfo.args.slice(1)
@@ -96,8 +122,9 @@ export const INSPECTORS: Record<string, Inspector> = {
     // Text replaced into a shell's words is pasted into its script before the
     // shell reads it, so the input runs as code: `x; rm -rf ~` is a command.
     // The input reaches a script safely only as arguments (`sh -c '…"$1"' _`).
-    const shell = SCRIPT_SHELL_NAMES.has(command[0]!.split("/").pop()!)
-    if (shell && replace && command.slice(1).some((a) => a.includes(replace))) {
+    const runs = innerWords(command)
+    const shell = SCRIPT_SHELL_NAMES.has(runs[0]!.split("/").pop()!)
+    if (shell && replace && runs.slice(1).some((a) => a.includes(replace))) {
       return prompt("xargs: input into a shell script", `"xargs" pastes its input into the shell script, where it runs as code`)
     }
     let subArgs: string[]

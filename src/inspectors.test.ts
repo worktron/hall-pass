@@ -95,6 +95,9 @@ describe("evaluateBashCommand", () => {
       expectPrompt(cmd("xargs", "-I{}", "sh", "-c", `wc -l "{}"`))
       expectPrompt(cmd("xargs", "-I{}", "bash", "-ec", "echo {}"))
       expectPrompt(cmd("xargs", "--replace", "/bin/zsh", "-c", "echo {}"))
+      expectPrompt(cmd("xargs", "-I{}", "env", "FOO=1", "sh", "-c", `echo "{}"`))
+      expectPrompt(cmd("xargs", "-I{}", "timeout", "5", "sh", "-c", `wc -l "{}"`))
+      expectPrompt(cmd("xargs", "-I{}", "nohup", "nice", "bash", "-c", "echo {}"))
     })
 
     test("xargs passing its input to a shell script as arguments → judged by the script", () => {
