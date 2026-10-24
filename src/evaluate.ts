@@ -72,6 +72,8 @@ export interface EvalContext {
   evaluate: (cmd: CommandInfo) => EvalResult
   /** The same context for commands that run in another scope: a `bash -c` script, `eval`, `find -execdir`. */
   within: (scope: Scope) => EvalContext
+  /** The same context with strictPlaceholders off, for a value hall-pass put in the words itself (xargs's input). */
+  withoutStrictPlaceholders: () => EvalContext
 }
 
 /**
@@ -105,6 +107,7 @@ export function createEvalContext(
     pipelineCommands,
     evaluate: (cmd) => evaluateBashCommand(cmd, ctx),
     within: (inner) => scopedContext(ctx, inner),
+    withoutStrictPlaceholders: () => relaxedContext(ctx),
   }
 
   return ctx
@@ -116,7 +119,15 @@ function scopedContext(outer: EvalContext, scope: Scope): EvalContext {
     scope,
     evaluate: (cmd) => evaluateBashCommand(cmd, ctx),
     within: (inner) => scopedContext(ctx, inner),
+    withoutStrictPlaceholders: () => relaxedContext(ctx),
   }
+  return ctx
+}
+
+/** A context's twin with strictPlaceholders off; the context itself when it is already off. */
+function relaxedContext(outer: EvalContext): EvalContext {
+  if (!outer.strictPlaceholders) return outer
+  const ctx: EvalContext = { ...outer, strictPlaceholders: false, evaluate: (cmd) => evaluateBashCommand(cmd, ctx) }
   return ctx
 }
 

@@ -73,6 +73,23 @@ describe("evaluateBashCommand", () => {
       expectAllow(cmd("xargs", "-I{}", "echo", "{}"))
     })
 
+    test("xargs's input reaches the command's words: appended, or where the replacement text is", () => {
+      expectPrompt(cmd("xargs", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-I", "tmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-Itmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-0", "-Itmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-itmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "--replace=tmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-J", "/tmp/foo", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-n", "1", "--", "rm", "-rf", "/tmp/foo"))
+    })
+
+    test("xargs flags with values are skipped, not taken for the command", () => {
+      expectAllow(cmd("xargs", "-n", "1", "-P", "4", "wc", "-l"))
+      expectAllow(cmd("xargs", "-0n1", "wc", "-l"))
+      expectAllow(cmd("xargs", "-L", "1", "-I", "{}", "echo", "{}"))
+    })
+
     test("bare xargs (defaults to echo) → allow", () => {
       expectAllow(cmd("xargs"))
     })
