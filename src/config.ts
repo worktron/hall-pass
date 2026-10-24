@@ -33,6 +33,13 @@ export interface HallPassConfig {
    * Codex's own sandbox and approval flow decide. See codex.ts.
    */
   codex: { deny_hard_stops: boolean };
+  /**
+   * readable_references: 1Password references (`op://vault/item/field`,
+   * matched as exact text) that `op read` may read without a prompt. Read
+   * only from the global config, never from a repository's `.hall-pass`.
+   * See the op inspector.
+   */
+  op: { readable_references: string[] };
 }
 
 /** Default protected path patterns — always active even without config. */
@@ -66,6 +73,7 @@ const DEFAULT_CONFIG: HallPassConfig = {
   debug: { enabled: false },
   classifier: { defer: true },
   codex: { deny_hard_stops: true },
+  op: { readable_references: [] },
 };
 
 /** Expand ~ to the user's home directory in a path string. */
@@ -106,6 +114,7 @@ function mergeConfig(
   const debug = user.debug as Partial<Record<string, unknown>> | undefined;
   const classifier = user.classifier as Partial<Record<string, unknown>> | undefined;
   const codex = user.codex as Partial<Record<string, unknown>> | undefined;
+  const op = user.op as Partial<Record<string, unknown>> | undefined;
 
   return {
     commands: {
@@ -147,7 +156,25 @@ function mergeConfig(
     codex: {
       deny_hard_stops: (codex?.deny_hard_stops as boolean) ?? defaults.codex.deny_hard_stops,
     },
+    op: {
+      readable_references: [
+        ...defaults.op.readable_references,
+        ...readableReferences(op?.readable_references),
+      ],
+    },
   };
+}
+
+/**
+ * The entries of a readable_references value that can name a reference:
+ * text starting with `op://` with no `$` (which is how a variable hall-pass
+ * cannot read looks in a command). Anything else, a string in place of a
+ * list, a number, a table, is dropped, so a typo keeps the prompt instead of
+ * breaking the hook.
+ */
+function readableReferences(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string" && v.startsWith("op://") && !v.includes("$"));
 }
 
 /** Resolve the global config file path. */
@@ -207,7 +234,8 @@ export async function loadConfig(): Promise<HallPassConfig> {
   const projectConfigPath = findProjectConfig(process.cwd());
   if (projectConfigPath) {
     const projectParsed = await readTomlConfig(projectConfigPath);
-    if (projectParsed) result = mergeConfig(result, projectParsed);
+    // A repository does not get to name your secrets: [op] is global only.
+    if (projectParsed) result = mergeConfig(result, { ...projectParsed, op: undefined });
   }
 
   return expandConfigPaths(result);
@@ -271,6 +299,14 @@ export function generateDefaultConfig(): string {
 # decide. Judgment calls (rm, sudo, ssh, ...) are never denied: hall-pass
 # shows its reason and leaves the prompt to Codex.
 # deny_hard_stops = false
+
+[op]
+# 1Password references that "op read" may read without a prompt, matched as
+# exact text. Trust implication: an agent that may read a reference may know
+# its value and send it anywhere, so list only keys whose leak costs little
+# (read-only and revocable). Read only from this file, never from a
+# repository's .hall-pass.
+# readable_references = ["op://Example/Read-only key/credential"]
 
 [debug]
 # Enable debug output to stderr

@@ -228,12 +228,31 @@ defer = true
 # Judgment calls are never denied. Default true.
 deny_hard_stops = true
 
+[op]
+# 1Password references "op read" may read without a prompt, as exact text.
+readable_references = ["op://Example/Read-only key/credential"]
+
 [debug]
 # Enable debug output to stderr
 enabled = true
 ```
 
 User config values **extend** built-in defaults — they never replace them.
+
+### Reading listed 1Password references
+
+hall-pass asks before every `op read`, since it hands a secret to the agent. `[op] readable_references` lists the references that may be read without asking, each written out in full and matched as exact text: `op read 'op://Example/Read-only key/credential'` is allowed, alone, inside `$(...)` (`curl -H "Authorization: Bearer $(op read '…')" https://…`) or as `KEY=$(op read '…') && curl …`, with the reason `op read: listed in [op] readable_references`. The rest of the line is judged as usual.
+
+The read keeps its prompt when anything about it is not plain:
+- a reference that is not listed, or is listed in another spelling (case, an extra path segment, a `?attribute=` suffix);
+- a reference held in a variable (`op read "$REF"`);
+- a second reference;
+- `--out-file`/`-o`, `--file-mode`, `--force`, or any flag other than `--account <plain name>`, `-n`/`--no-newline`, `--no-color`, `--cache` and `--iso-timestamps`;
+- an `--account` value the shell could expand (`$A`, braces, globs).
+
+Every other `op` command is unchanged: `op item get`, `op run` and `op inject` still ask, even for a listed item.
+
+Listing a reference means agents may know its value. A listed read's output can go anywhere the line sends it (any host, a pipe, a `>` redirect), and a bare read shows the value to the agent. So list only keys whose leak costs little: read-only and revocable. The list is read only from the global config file; a repository's `.hall-pass` cannot add to it.
 
 ## Debug mode
 
