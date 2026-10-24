@@ -88,6 +88,8 @@ describe("evaluateBashCommand", () => {
     test("xargs whose input names the command it runs → prompt", () => {
       expectPrompt(cmd("xargs", "-I", "echo", "echo", "-rf", "/"))
       expectPrompt(cmd("xargs", "-J", "echo", "echo", "-rf", "/"))
+      expectPrompt(cmd("xargs", "-I{}", "env", "{}"))
+      expectPrompt(cmd("xargs", "-I{}", "timeout", "5", "{}", "-rf", "/"))
     })
 
     test("xargs -I into a shell's script → prompt (the input runs as code)", () => {
@@ -102,7 +104,12 @@ describe("evaluateBashCommand", () => {
 
     test("xargs passing its input to a shell script as arguments → judged by the script", () => {
       expectAllow(cmd("xargs", "-n1", "sh", "-c", `wc -l "$1"`, "_"))
-      expectAllow(cmd("xargs", "-I{}", "sh", "-c", `wc -l "$1"`, "_", "plain-word"))
+      expectAllow(cmd("xargs", "-I{}", "sh", "-c", `wc -l "$1"`, "_", "{}"))
+    })
+
+    test("xargs input reaching a shell script through another proxy → prompt", () => {
+      expectPrompt(cmd("xargs", "-I{}", "find", ".", "-maxdepth", "0", "-exec", "sh", "-c", `echo "{}"`, ";"))
+      expectPrompt(cmd("xargs", "-I{}", "xargs", "sh", "-c", `echo "{}"`))
     })
 
     test("xargs flags with values are skipped, not taken for the command", () => {

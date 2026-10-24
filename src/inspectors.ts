@@ -59,12 +59,10 @@ function parseXargs(args: string[]): { command: string[]; replace?: string; repl
   return null
 }
 
-const SCRIPT_SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash"])
-
 /**
  * The words of the command a line finally runs, past `env` (its flags and
  * assignments) and the transparent wrappers (nohup, nice, timeout, ...), so
- * `timeout 5 sh -c …` is the sh it starts.
+ * `xargs -I{} env {}` runs whatever the input names.
  */
 function innerWords(words: string[]): string[] {
   for (;;) {
@@ -119,14 +117,6 @@ export const INSPECTORS: Record<string, Inspector> = {
     // No command specified — xargs defaults to echo, which is safe
     if (!parsed) return allow("xargs: defaults to echo")
     const { command, replace, replaceWhole } = parsed
-    // Text replaced into a shell's words is pasted into its script before the
-    // shell reads it, so the input runs as code: `x; rm -rf ~` is a command.
-    // The input reaches a script safely only as arguments (`sh -c '…"$1"' _`).
-    const runs = innerWords(command)
-    const shell = SCRIPT_SHELL_NAMES.has(runs[0]!.split("/").pop()!)
-    if (shell && replace && runs.slice(1).some((a) => a.includes(replace))) {
-      return prompt("xargs: input into a shell script", `"xargs" pastes its input into the shell script, where it runs as code`)
-    }
     let subArgs: string[]
     if (replace !== undefined) {
       subArgs = replace === "" ? command : command.map((a) => a.split(replace).join(XARGS_INPUT))
@@ -135,7 +125,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     } else {
       subArgs = [...command, XARGS_INPUT]
     }
-    if (subArgs[0] !== command[0]) {
+    if (innerWords(subArgs)[0]!.includes(XARGS_INPUT)) {
       return prompt("xargs: command from its input", `"xargs" takes the name of the command it runs from its input`)
     }
     const name = command[0]!.split("/").pop()!
@@ -1480,6 +1470,13 @@ function shellInspector(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
 
   if (!script) {
     return prompt(`${shell}: -c with empty script`, `"${shell} -c" with empty script`)
+  }
+
+  // xargs pastes its input into the script text before the shell reads it
+  // (`xargs -I{} sh -c 'echo {}'`), so the input runs as code: `x; rm -rf ~`
+  // is a command. It reaches a script safely only as an argument ("$1").
+  if (script.includes(XARGS_INPUT)) {
+    return prompt(`${shell}: xargs input in the script`, `"xargs" pastes its input into the "${shell} -c" script, where it runs as code`)
   }
 
   // Parse the inline script with shfmt
