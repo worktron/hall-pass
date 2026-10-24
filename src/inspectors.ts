@@ -11,14 +11,78 @@ import { extractCommandInfos } from "./parser.ts"
 import type { EvalResult, EvalContext } from "./evaluate.ts"
 import { checkGitCommand } from "./git.ts"
 import { DANGEROUS_ENV_VARS } from "./safelist.ts"
-import { checkFilePath } from "./paths.ts"
+import { checkFilePath, XARGS_INPUT } from "./paths.ts"
 import { parseApplyPatch, checkPatch } from "./patch.ts"
 import { scopeOf } from "./places.ts"
+import { unwrapCommand } from "./wrappers.ts"
 
 export type Inspector = (cmdInfo: CommandInfo, ctx: EvalContext) => EvalResult
 
 const allow = (reason: string): EvalResult => ({ decision: "allow", reason })
 const prompt = (reason: string, message: string): EvalResult => ({ decision: "prompt", reason, message })
+
+/** xargs flags that take a value, attached (`-I{}`) or as the next argument (BSD and GNU). */
+const XARGS_VALUE_FLAGS = new Set(["I", "J", "L", "n", "P", "d", "s", "a", "R", "E", "S"])
+
+/**
+ * Split `xargs [flags] command [args...]` into the command and how the input
+ * reaches it: `replace` (-I, -i, --replace) is text replaced wherever it
+ * appears, `replaceWhole` (-J) an argument replaced when it is exactly that
+ * text; with neither, the input is appended. Short flags are read the way
+ * getopt reads them, so a cluster like `-0I{}` is `-0` and `-I {}`. Null
+ * when no command is named.
+ */
+function parseXargs(args: string[]): { command: string[]; replace?: string; replaceWhole?: string } | null {
+  let replace: string | undefined
+  let replaceWhole: string | undefined
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === "--") return args.length > i + 1 ? { command: args.slice(i + 1), replace, replaceWhole } : null
+    if (arg.startsWith("--")) {
+      if (arg === "--replace") replace = "{}"
+      else if (arg.startsWith("--replace=")) replace = arg.slice("--replace=".length)
+      continue
+    }
+    if (!arg.startsWith("-") || arg === "-") return { command: args.slice(i), replace, replaceWhole }
+    for (let j = 1; j < arg.length; j++) {
+      const flag = arg[j]!
+      // GNU -i, -e and -l take an optional value, attached only.
+      if (flag === "i") { replace = arg.slice(j + 1) || "{}"; break }
+      if (flag === "e" || flag === "l") break
+      if (!XARGS_VALUE_FLAGS.has(flag)) continue
+      const value = j + 1 < arg.length ? arg.slice(j + 1) : args[++i] ?? ""
+      if (flag === "I") replace = value
+      else if (flag === "J") replaceWhole = value
+      break
+    }
+  }
+  return null
+}
+
+/**
+ * The words of the command a line finally runs, past `env` (its flags and
+ * assignments) and the transparent wrappers (nohup, nice, timeout, ...), so
+ * `xargs -I{} env {}` runs whatever the input names.
+ */
+function innerWords(words: string[]): string[] {
+  for (;;) {
+    const name = words[0]!.split("/").pop()!
+    if (name === "env") {
+      let i = 1
+      while (i < words.length && (words[i]!.startsWith("-") || words[i]!.includes("="))) {
+        if (words[i] === "-u" || words[i] === "--unset") i++
+        i++
+      }
+      if (i >= words.length) return words
+      words = words.slice(i)
+      continue
+    }
+    const cmdInfo: CommandInfo = { name, args: [name, ...words.slice(1)], assigns: [] }
+    const inner = unwrapCommand(cmdInfo)
+    if (inner === cmdInfo) return words
+    words = inner.args
+  }
+}
 
 /** pkill and killall: a judgment call, unless the words only list signals or ask for help. */
 function killByPattern(cmdInfo: CommandInfo): EvalResult {
@@ -40,30 +104,38 @@ export const INSPECTORS: Record<string, Inspector> = {
 
   // -- Commands that proxy other commands --
 
+  // The command xargs runs is judged with the words xargs gives it at run
+  // time, which come from its input: appended after the last argument, or,
+  // with -I/-i/--replace, put wherever the replacement text appears, and with
+  // -J, in place of the argument that is exactly it. That input stands in the
+  // words as XARGS_INPUT, a value nobody can read, so `echo /Users/x | xargs
+  // rm -rf /tmp/foo` is judged as the rm it runs, not as `rm -rf /tmp/foo`.
+  // A file command reading the input stays allowed (`find … | xargs wc -l`):
+  // the path check leaves XARGS_INPUT out of its unreadable-variable test.
   xargs: (cmdInfo, ctx) => {
-    const args = cmdInfo.args
-    // xargs [flags] command [initial-args...]
-    for (let i = 1; i < args.length; i++) {
-      const arg = args[i]!
-      // Skip xargs flags and their values
-      if (arg === "-I" || arg === "-L" || arg === "-n" || arg === "-P" ||
-          arg === "-d" || arg === "-s" || arg === "-a" || arg === "-R") {
-        i++ // skip value
-        continue
-      }
-      if (arg.startsWith("-")) continue
-      // Everything from here is the sub-command + its args
-      const subArgs = args.slice(i)
-      // The process ids arrive on stdin, usually from pgrep, ps or lsof: a
-      // kill by pattern, like pkill. `kill $(cat app.pid)` names its own.
-      if (subArgs[0] === "kill") {
-        return prompt("xargs kill: kills the processes piped in", `"xargs kill" stops whichever processes the input names, usually found by a pattern`)
-      }
-      const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
-      return ctx.evaluate(subCmd)
-    }
+    const parsed = parseXargs(cmdInfo.args)
     // No command specified — xargs defaults to echo, which is safe
-    return allow("xargs: defaults to echo")
+    if (!parsed) return allow("xargs: defaults to echo")
+    const { command, replace, replaceWhole } = parsed
+    let subArgs: string[]
+    if (replace !== undefined) {
+      subArgs = replace === "" ? command : command.map((a) => a.split(replace).join(XARGS_INPUT))
+    } else if (replaceWhole !== undefined) {
+      subArgs = command.map((a) => a === replaceWhole ? XARGS_INPUT : a)
+    } else {
+      subArgs = [...command, XARGS_INPUT]
+    }
+    if (innerWords(subArgs)[0]!.includes(XARGS_INPUT)) {
+      return prompt("xargs: command from its input", `"xargs" takes the name of the command it runs from its input`)
+    }
+    const name = command[0]!.split("/").pop()!
+    // The process ids arrive on stdin, usually from pgrep, ps or lsof: a
+    // kill by pattern, like pkill. `kill $(cat app.pid)` names its own.
+    if (name === "kill") {
+      return prompt("xargs kill: kills the processes piped in", `"xargs kill" stops whichever processes the input names, usually found by a pattern`)
+    }
+    const subCmd: CommandInfo = { name, args: [name, ...subArgs.slice(1)], assigns: [] }
+    return ctx.evaluate(subCmd)
   },
 
   source: () => {
@@ -1398,6 +1470,13 @@ function shellInspector(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult {
 
   if (!script) {
     return prompt(`${shell}: -c with empty script`, `"${shell} -c" with empty script`)
+  }
+
+  // xargs pastes its input into the script text before the shell reads it
+  // (`xargs -I{} sh -c 'echo {}'`), so the input runs as code: `x; rm -rf ~`
+  // is a command. It reaches a script safely only as an argument ("$1").
+  if (script.includes(XARGS_INPUT)) {
+    return prompt(`${shell}: xargs input in the script`, `"xargs" pastes its input into the "${shell} -c" script, where it runs as code`)
   }
 
   // Parse the inline script with shfmt

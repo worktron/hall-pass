@@ -59,6 +59,7 @@ describe("evaluateBashCommand", () => {
       expectPrompt(cmd("xargs", "kill"))
       expectPrompt(cmd("xargs", "-n1", "kill"))
       expectPrompt(cmd("xargs", "-I", "{}", "kill", "-9", "{}"))
+      expectPrompt(cmd("xargs", "/bin/kill"))
     })
 
     test("xargs rm → prompt", () => {
@@ -71,6 +72,50 @@ describe("evaluateBashCommand", () => {
 
     test("xargs with -I flag then safe cmd → allow", () => {
       expectAllow(cmd("xargs", "-I{}", "echo", "{}"))
+    })
+
+    test("xargs's input reaches the command's words: appended, or where the replacement text is", () => {
+      expectPrompt(cmd("xargs", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-I", "tmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-Itmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-0", "-Itmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-itmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "--replace=tmp", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-J", "/tmp/foo", "rm", "-rf", "/tmp/foo"))
+      expectPrompt(cmd("xargs", "-n", "1", "--", "rm", "-rf", "/tmp/foo"))
+    })
+
+    test("xargs whose input names the command it runs → prompt", () => {
+      expectPrompt(cmd("xargs", "-I", "echo", "echo", "-rf", "/"))
+      expectPrompt(cmd("xargs", "-J", "echo", "echo", "-rf", "/"))
+      expectPrompt(cmd("xargs", "-I{}", "env", "{}"))
+      expectPrompt(cmd("xargs", "-I{}", "timeout", "5", "{}", "-rf", "/"))
+    })
+
+    test("xargs -I into a shell's script → prompt (the input runs as code)", () => {
+      expectPrompt(cmd("xargs", "-I{}", "sh", "-c", "echo {}"))
+      expectPrompt(cmd("xargs", "-I{}", "sh", "-c", `wc -l "{}"`))
+      expectPrompt(cmd("xargs", "-I{}", "bash", "-ec", "echo {}"))
+      expectPrompt(cmd("xargs", "--replace", "/bin/zsh", "-c", "echo {}"))
+      expectPrompt(cmd("xargs", "-I{}", "env", "FOO=1", "sh", "-c", `echo "{}"`))
+      expectPrompt(cmd("xargs", "-I{}", "timeout", "5", "sh", "-c", `wc -l "{}"`))
+      expectPrompt(cmd("xargs", "-I{}", "nohup", "nice", "bash", "-c", "echo {}"))
+    })
+
+    test("xargs passing its input to a shell script as arguments → judged by the script", () => {
+      expectAllow(cmd("xargs", "-n1", "sh", "-c", `wc -l "$1"`, "_"))
+      expectAllow(cmd("xargs", "-I{}", "sh", "-c", `wc -l "$1"`, "_", "{}"))
+    })
+
+    test("xargs input reaching a shell script through another proxy → prompt", () => {
+      expectPrompt(cmd("xargs", "-I{}", "find", ".", "-maxdepth", "0", "-exec", "sh", "-c", `echo "{}"`, ";"))
+      expectPrompt(cmd("xargs", "-I{}", "xargs", "sh", "-c", `echo "{}"`))
+    })
+
+    test("xargs flags with values are skipped, not taken for the command", () => {
+      expectAllow(cmd("xargs", "-n", "1", "-P", "4", "wc", "-l"))
+      expectAllow(cmd("xargs", "-0n1", "wc", "-l"))
+      expectAllow(cmd("xargs", "-L", "1", "-I", "{}", "echo", "{}"))
     })
 
     test("bare xargs (defaults to echo) → allow", () => {
