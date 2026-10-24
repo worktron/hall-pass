@@ -90,11 +90,16 @@ describe("evaluateBashCommand", () => {
       expectPrompt(cmd("xargs", "-J", "echo", "echo", "-rf", "/"))
     })
 
-    test("xargs -I into a shell's -c script: the script still parses and is judged with the input", () => {
-      expectAllow(cmd("xargs", "-I{}", "sh", "-c", "wc -l {}"))
-      expectAllow(cmd("xargs", "-I{}", "sh", "-c", `echo "== {}"; wc -l {}`))
-      expectPrompt(cmd("xargs", "-I{}", "sh", "-c", "rm {}"))
-      expectPrompt(cmd("xargs", "-I{}", "bash", "-ec", "rm -rf /tmp/x/{}"))
+    test("xargs -I into a shell's script → prompt (the input runs as code)", () => {
+      expectPrompt(cmd("xargs", "-I{}", "sh", "-c", "echo {}"))
+      expectPrompt(cmd("xargs", "-I{}", "sh", "-c", `wc -l "{}"`))
+      expectPrompt(cmd("xargs", "-I{}", "bash", "-ec", "echo {}"))
+      expectPrompt(cmd("xargs", "--replace", "/bin/zsh", "-c", "echo {}"))
+    })
+
+    test("xargs passing its input to a shell script as arguments → judged by the script", () => {
+      expectAllow(cmd("xargs", "-n1", "sh", "-c", `wc -l "$1"`, "_"))
+      expectAllow(cmd("xargs", "-I{}", "sh", "-c", `wc -l "$1"`, "_", "plain-word"))
     })
 
     test("xargs flags with values are skipped, not taken for the command", () => {

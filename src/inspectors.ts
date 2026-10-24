@@ -60,16 +60,6 @@ function parseXargs(args: string[]): { command: string[]; replace?: string; repl
 
 const SCRIPT_SHELL_NAMES = new Set(["sh", "bash", "zsh", "dash"])
 
-/** Where a shell's `-c` script is in its words (`-c`, or a cluster like `-ec`, takes the next one); -1 when there is none. */
-function shellScriptIndex(args: string[]): number {
-  for (let i = 1; i < args.length; i++) {
-    const arg = args[i]!
-    if (!arg.startsWith("-") || arg.startsWith("--")) return -1
-    if (arg.slice(1).includes("c")) return i + 1 < args.length ? i + 1 : -1
-  }
-  return -1
-}
-
 /** pkill and killall: a judgment call, unless the words only list signals or ask for help. */
 function killByPattern(cmdInfo: CommandInfo): EvalResult {
   const rest = cmdInfo.args.slice(1)
@@ -103,13 +93,16 @@ export const INSPECTORS: Record<string, Inspector> = {
     // No command specified — xargs defaults to echo, which is safe
     if (!parsed) return allow("xargs: defaults to echo")
     const { command, replace, replaceWhole } = parsed
-    // A shell's -c script is code: the input goes in double quotes there, so
-    // the script still parses and reads it as one word.
-    const script = SCRIPT_SHELL_NAMES.has(command[0]!.split("/").pop()!) ? shellScriptIndex(command) : -1
-    const input = (i: number) => i === script ? `"${XARGS_INPUT}"` : XARGS_INPUT
+    // Text replaced into a shell's words is pasted into its script before the
+    // shell reads it, so the input runs as code: `x; rm -rf ~` is a command.
+    // The input reaches a script safely only as arguments (`sh -c '…"$1"' _`).
+    const shell = SCRIPT_SHELL_NAMES.has(command[0]!.split("/").pop()!)
+    if (shell && replace && command.slice(1).some((a) => a.includes(replace))) {
+      return prompt("xargs: input into a shell script", `"xargs" pastes its input into the shell script, where it runs as code`)
+    }
     let subArgs: string[]
     if (replace !== undefined) {
-      subArgs = replace === "" ? command : command.map((a, i) => a.split(replace).join(input(i)))
+      subArgs = replace === "" ? command : command.map((a) => a.split(replace).join(XARGS_INPUT))
     } else if (replaceWhole !== undefined) {
       subArgs = command.map((a) => a === replaceWhole ? XARGS_INPUT : a)
     } else {
