@@ -30,7 +30,12 @@ import { rootScope, type Scope } from "./places.ts"
 import { extractSqlFromArgs, isSqlReadOnly } from "./sql.ts"
 
 export type EvalResult =
-  | { decision: "allow"; reason: string }
+  /**
+   * `grant` marks an allow that a setting in the user's own config gave
+   * (`[op] readable_references`): decide.ts reports its reason for the line
+   * instead of "all commands safe", so the setting shows where it acted.
+   */
+  | { decision: "allow"; reason: string; grant?: boolean }
   /**
    * `hard` marks a prompt that stands in every permission mode: protected
    * paths, code injection, pushes to protected branches. Every other prompt

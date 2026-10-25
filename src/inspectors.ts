@@ -84,6 +84,43 @@ function innerWords(words: string[]): string[] {
   }
 }
 
+/** An account as `--account` names it: a shorthand, sign-in address, email or user id, with nothing the shell would expand. */
+const OP_ACCOUNT = /^[A-Za-z0-9._@+-]+$/
+
+/** `op` flags that change nothing about what a read returns or where it goes. */
+const OP_PLAIN_FLAGS = new Set(["--no-color", "--cache", "--iso-timestamps"])
+
+/**
+ * The reference of `op [global flags] read [flags] <reference>`, or null when
+ * the words are anything else. Only `--account` (with a plain account name,
+ * `--account x` or `--account=x`), `-n`/`--no-newline` after `read`, and the
+ * flags in OP_PLAIN_FLAGS may appear; `--out-file`/`-o`, `--file-mode`,
+ * `--force`, a merged cluster like `-no`, `--`, any other flag and a second
+ * reference all make it null, so the read keeps its prompt.
+ */
+function opRead(args: string[]): string | null {
+  let read = false
+  const positionals: string[] = []
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i]!
+    if (arg === "--account" || arg.startsWith("--account=")) {
+      const account = arg === "--account" ? args[++i] : arg.slice("--account=".length)
+      if (account === undefined || !OP_ACCOUNT.test(account)) return null
+      continue
+    }
+    if (OP_PLAIN_FLAGS.has(arg)) continue
+    if (read && (arg === "-n" || arg === "--no-newline")) continue
+    if (arg.startsWith("-")) return null
+    if (!read) {
+      if (arg !== "read") return null
+      read = true
+      continue
+    }
+    positionals.push(arg)
+  }
+  return read && positionals.length === 1 ? positionals[0]! : null
+}
+
 /** pkill and killall: a judgment call, unless the words only list signals or ask for help. */
 function killByPattern(cmdInfo: CommandInfo): EvalResult {
   const rest = cmdInfo.args.slice(1)
@@ -614,9 +651,14 @@ export const INSPECTORS: Record<string, Inspector> = {
   // 1Password CLI. Allow read-only metadata; prompt on anything that exposes
   // secret values (item get, read, document get), mutates vaults, or runs
   // commands with injected secrets (run, inject). Default is prompt — a
-  // secrets manager should fail closed.
-  op: (cmdInfo) => {
+  // secrets manager should fail closed. The one exception is an `op read` of
+  // a reference the user listed in `[op] readable_references` (opRead).
+  op: (cmdInfo, ctx) => {
     const args = cmdInfo.args
+    const reference = opRead(args)
+    if (reference !== null && ctx.config.op.readable_references.includes(reference)) {
+      return { decision: "allow", reason: "op read: listed in [op] readable_references", grant: true }
+    }
     // First positional after "op" is the noun/command; second is the verb.
     const positionals = args.slice(1).filter((a) => !a.startsWith("-"))
     const noun = positionals[0]

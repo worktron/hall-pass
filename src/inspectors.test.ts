@@ -14,6 +14,7 @@ const TEST_CONFIG: HallPassConfig = {
   paths: { protected: [], read_only: [], no_delete: [] },
   audit: { enabled: false, path: "" },
   debug: { enabled: false },
+  op: { readable_references: [] },
 }
 
 import { resolve } from "path"
@@ -1753,6 +1754,72 @@ describe("evaluateBashCommand", () => {
     test("op inject → prompt", () => expectPrompt(cmd("op", "inject", "-i", "tpl")))
     test("op item create → prompt (mutation)", () => expectPrompt(cmd("op", "item", "create")))
     test("op item delete → prompt (mutation)", () => expectPrompt(cmd("op", "item", "delete", "x")))
+
+    describe("[op] readable_references", () => {
+      const LISTED = "op://Example/Read-only key/credential"
+      const listedCtx = () => createEvalContext({ ...TEST_CONFIG, op: { readable_references: [LISTED] } }, [], shfmtBin)
+      const decision = (...rest: string[]) => evaluateBashCommand(cmd("op", ...rest), listedCtx())
+
+      test("a listed reference reads with no prompt, and the reason names the setting", () => {
+        const result = decision("read", LISTED)
+        expect(result).toEqual({ decision: "allow", reason: "op read: listed in [op] readable_references", grant: true })
+      })
+
+      test("the account and the flags that change nothing keep the allowance", () => {
+        for (const rest of [
+          ["read", "--account", "example.1password.com", LISTED],
+          ["read", "--account=example.1password.com", LISTED],
+          ["--account", "example.1password.com", "read", LISTED],
+          ["read", "-n", LISTED],
+          ["read", LISTED, "--no-newline"],
+          ["--no-color", "--cache", "--iso-timestamps", "read", LISTED],
+        ]) expect(decision(...rest).decision).toBe("allow")
+      })
+
+      test("a reference not listed, or listed with any other spelling, prompts", () => {
+        for (const ref of [
+          "op://Example/Read-only key/password",
+          "op://Example/Other key/credential",
+          "op://Example/Read-only key/credential/extra",
+          "op://Example/Read-only key/credential?attribute=otp",
+          "op://example/read-only key/credential",
+          "op://Example/Read-only key/credential ",
+          "op://Example/Read-only key/$FIELD",
+        ]) expect(decision("read", ref).decision).toBe("prompt")
+      })
+
+      test("flags that write the value to a file, or that hall-pass does not know, prompt", () => {
+        for (const rest of [
+          ["read", "--out-file", "key.txt", LISTED],
+          ["read", "--out-file=key.txt", LISTED],
+          ["read", "-o", "key.txt", LISTED],
+          ["read", LISTED, "-o", "key.txt"],
+          ["read", "--file-mode", "0644", LISTED],
+          ["read", "-f", LISTED],
+          ["read", "--force", LISTED],
+          ["read", "-no", "key.txt", LISTED],
+          ["read", "-nf", LISTED],
+          ["read", "--session", "token", LISTED],
+          ["read", "--", LISTED],
+        ]) expect(decision(...rest).decision).toBe("prompt")
+      })
+
+      test("an account value the shell could expand into more words prompts", () => {
+        for (const account of ["{x,op://Private/bank/password,-o}", "$(cat a)", "$ACCOUNT", "a b", "a*"]) {
+          expect(decision("read", "--account", account, LISTED).decision).toBe("prompt")
+        }
+      })
+
+      test("two references, or a listed item read another way, prompt", () => {
+        expect(decision("read", LISTED, "op://Private/bank/password").decision).toBe("prompt")
+        expect(decision("item", "get", "Read-only key", "--vault", "Example", "--fields", "credential").decision).toBe("prompt")
+        expect(decision("inject", "-i", "tpl").decision).toBe("prompt")
+      })
+
+      test("with nothing listed, a read prompts as before", () => {
+        expectPrompt(cmd("op", "read", LISTED))
+      })
+    })
   })
 
   describe("yt-dlp", () => {

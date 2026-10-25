@@ -182,6 +182,49 @@ enabled = true
     }
   });
 
+  test("[op] readable_references merges from the global config, keeping only references", async () => {
+    const configPath = resolve(tmpDir, "config.toml");
+    await writeFile(
+      configPath,
+      `[op]\nreadable_references = ["op://Example/Read-only key/credential", 7, "not-a-reference", "op://Example/$X/field"]\n`,
+    );
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
+    expect(config.op.readable_references).toEqual(["op://Example/Read-only key/credential"]);
+  });
+
+  test("a malformed [op] readable_references is dropped, not an error", async () => {
+    for (const value of [`"op://Example/Read-only key/credential"`, `7`, `{ ref = "op://Example/k/f" }`]) {
+      const configPath = resolve(tmpDir, "config.toml");
+      await writeFile(configPath, `[commands]\nsafe = ["terraform"]\n\n[op]\nreadable_references = ${value}\n`);
+      process.env.HALL_PASS_CONFIG = configPath;
+      const config = await loadConfig();
+      expect(config.op.readable_references).toEqual([]);
+      expect(config.commands.safe).toContain("terraform");
+    }
+  });
+
+  test("a repository's .hall-pass cannot list readable references", async () => {
+    process.env.HALL_PASS_CONFIG = resolve(tmpDir, "no-global.toml");
+
+    const repo = resolve(tmpDir, "repo-with-op");
+    await mkdir(resolve(repo, ".git"), { recursive: true });
+    await writeFile(
+      resolve(repo, ".hall-pass"),
+      `[commands]\nsafe = ["terraform"]\n\n[op]\nreadable_references = ["op://Private/bank/password"]\n`,
+    );
+
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(repo);
+      const config = await loadConfig();
+      expect(config.commands.safe).toContain("terraform");
+      expect(config.op.readable_references).toEqual([]);
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
   test("project-local .hall-pass without sibling .git/ is ignored", async () => {
     process.env.HALL_PASS_CONFIG = resolve(tmpDir, "no-global.toml");
 
@@ -276,6 +319,7 @@ describe("generateDefaultConfig", () => {
     expect(config).toContain("[paths]");
     expect(config).toContain("[audit]");
     expect(config).toContain("[debug]");
+    expect(config).toContain("[op]");
     expect(config).toContain("#");
   });
 });

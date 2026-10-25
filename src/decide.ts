@@ -329,6 +329,7 @@ export async function decide(
 
   let hasPass = false
   let handedOver: string | null = null   // first judgment-call prompt deferred to the classifier
+  let granted: string | null = null      // first allow a config setting gave (EvalResult.grant)
   for (const cmdInfo of commandInfos) {
     const result = evaluateWithValues(cmdInfo, values, ctx, strictCtx)
     debug("eval", { name: cmdInfo.name, decision: result.decision })
@@ -351,6 +352,8 @@ export async function decide(
     if (result.decision === "pass") {
       hasPass = true
     }
+
+    if (result.decision === "allow" && result.grant) granted ??= result.reason
   }
 
   // Precedence once every command has been seen: a deferred judgment call
@@ -371,8 +374,9 @@ export async function decide(
     return pass("pipeline contains unknown commands")
   }
 
-  audit.log({ tool: "Bash", input: command, decision: "allow", reason: "all commands safe", layer: "evaluate" })
-  return allow("all commands safe")
+  const reason = granted ?? "all commands safe"
+  audit.log({ tool: "Bash", input: command, decision: "allow", reason, layer: "evaluate" })
+  return allow(reason)
 }
 
 /**
