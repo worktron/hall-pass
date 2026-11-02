@@ -1,6 +1,6 @@
 import { describe, test, expect } from "bun:test"
 import { checkFilePath, checkCommandPaths } from "./paths.ts"
-import type { HallPassConfig } from "./config.ts"
+import { DEFAULT_PROTECTED_PATHS, type HallPassConfig } from "./config.ts"
 import type { CommandInfo } from "./parser.ts"
 import { homedir } from "os"
 import { resolve } from "path"
@@ -99,6 +99,44 @@ describe("checkFilePath", () => {
 
     expect(checkFilePath("/project/credentials.json", "write", config).allowed).toBe(false)
     expect(checkFilePath("/project/credentials", "read", config).allowed).toBe(false)
+  })
+
+  test("source code named after secrets or credentials is not a secret store", () => {
+    const config = makeConfig({ protected: DEFAULT_PROTECTED_PATHS })
+
+    for (const file of [
+      "/repo/bin/secrets.ts",
+      "/repo/bin/secrets.test.ts",
+      "/repo/src/secret_manager.py",
+      "/repo/pkg/credentials.go",
+      "/repo/Sources/Credentials.swift",
+    ]) {
+      expect(checkFilePath(file, "read", config).allowed).toBe(true)
+      expect(checkFilePath(file, "write", config).allowed).toBe(true)
+    }
+  })
+
+  test("data files named after secrets or credentials stay protected", () => {
+    const config = makeConfig({ protected: DEFAULT_PROTECTED_PATHS })
+
+    for (const file of [
+      "/repo/secrets.json",
+      "/repo/secrets.yaml",
+      "/repo/secrets.env",
+      "/repo/secrets.sh",
+      "/repo/secret.key",
+      "/repo/secrets",
+      "/repo/credentials",
+      "/repo/credentials.json",
+    ]) {
+      expect(checkFilePath(file, "read", config).allowed).toBe(false)
+    }
+  })
+
+  test("a pattern the user adds is never narrowed for source code", () => {
+    const config = makeConfig({ protected: ["**/vault*"] })
+
+    expect(checkFilePath("/repo/src/vault.ts", "write", config).allowed).toBe(false)
   })
 
   test("default protected paths catch .ssh", () => {

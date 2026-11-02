@@ -519,6 +519,26 @@ describe("Write/Edit secret detection", () => {
       old_string: `// placeholder`,
     }))
   })
+
+  test("Edit of a source file named secrets.ts → allow", async () => {
+    expectAllow(await runHookForTool("Edit", {
+      file_path: "/repo/bin/secrets.ts",
+      old_string: `const q = v.match(/^(["'])(.*)\\1$/)`,
+      new_string: `const q = v.match(/^(["'])([\\s\\S]*)\\1$/)`,
+    }))
+  })
+
+  test("Edit of secrets.ts that pastes in a private key → prompt", async () => {
+    expectPrompt(await runHookForTool("Edit", {
+      file_path: "/repo/bin/secrets.ts",
+      new_string: `-----BEGIN RSA PRIVATE KEY-----\nMIIEow...`,
+      old_string: `// placeholder`,
+    }))
+  })
+
+  test("Bash reading a source file named secrets.ts → allow", async () => {
+    expectAllow(await runHook("wc -l bin/apply.ts bin/secrets.ts; sed -n 1,60p bin/secrets.ts"))
+  })
 })
 
 describe("feedback layer — should ALLOW with additionalContext nudge", () => {

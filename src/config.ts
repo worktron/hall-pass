@@ -53,6 +53,22 @@ export const DEFAULT_PROTECTED_PATHS = [
   "**/*id_rsa*",
 ];
 
+/**
+ * Default patterns that match a file by its name alone. A source file
+ * named `secrets.ts` or `credentials.go` is code that handles secrets, not
+ * a place they are kept, so these two skip files with a source code
+ * extension. A key pasted into such a file is still caught by the content
+ * scanner (secrets.ts). Patterns a user adds in config are never narrowed.
+ * Shell scripts are left protected: they often export the values themselves.
+ */
+export const NAME_ONLY_PROTECTED_PATHS = new Set(["**/credentials*", "**/secret*"]);
+
+export const SOURCE_CODE_EXTENSIONS = new Set([
+  ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
+  ".py", ".rb", ".go", ".rs", ".swift", ".kt", ".java", ".scala",
+  ".c", ".h", ".cc", ".cpp", ".hpp", ".cs", ".m", ".php", ".ex", ".exs",
+]);
+
 /** Default read-only path patterns — reads allowed, writes/deletes blocked. */
 export const DEFAULT_READ_ONLY_PATHS = ["**/.env", "**/.env.*"];
 

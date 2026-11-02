@@ -6,8 +6,8 @@
  */
 
 import type { HallPassConfig } from "./config.ts"
-import { expandTilde } from "./config.ts"
-import { resolve } from "path"
+import { expandTilde, NAME_ONLY_PROTECTED_PATHS, SOURCE_CODE_EXTENSIONS } from "./config.ts"
+import { extname, resolve } from "path"
 import type { CommandInfo } from "./parser.ts"
 
 export interface PathDecision {
@@ -77,7 +77,9 @@ export function checkFilePath(
   config: HallPassConfig,
 ): PathDecision {
   // Check protected paths — block ALL operations
+  const sourceCode = SOURCE_CODE_EXTENSIONS.has(extname(filePath).toLowerCase())
   for (const pattern of config.paths.protected) {
+    if (sourceCode && NAME_ONLY_PROTECTED_PATHS.has(pattern)) continue
     if (matchesPattern(filePath, pattern)) {
       return { allowed: false, reason: `matches protected path ${pattern}` }
     }
