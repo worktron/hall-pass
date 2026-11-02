@@ -11,3 +11,11 @@ Done when: each copy named above is deleted and the app-kit piece is used in its
 Do not touch: anything app-kit has no piece for; app-kit itself (a gap found while moving goes back to app-kit as a ticket there).
 Needs: nothing for the first part; each later piece needs its app-kit ticket landed.
 Touches: the command's files, its tests, package.json, bun.lock.
+
+## audit-log-redact · The audit log blanks API keys before it keeps a command
+
+Goal: hall-pass's audit log (`~/.config/hall-pass/audit.jsonl` and its rotated archives) stops keeping keys in plain text. Each decision line keeps the command as typed, so a key typed into a command sits in the log: the same commands that put four real Anthropic keys into metamax's permission log until 2026-11-02 are in this log too, along with Clerk, Twilio, AWS and 1Password values. Metamax now blanks key-shaped text to `[redacted]`, by prefix to the next separator whatever its length (metamax `server/lib/redact-secrets.ts`, commit bbd35d36). Use the same rules here, copied or shared, before `audit.log` writes `input`. Then do a one-off blanking of the existing log and archives, on the owner's yes. Metamax joins its permission rows to this log by call id, and by the first sixty or so characters of the command for Codex rows, which carry no id. Blanking here changes that prefix, so check metamax's join (`decisionForCall` in metamax `server/live/approvals.ts`) still matches a blanked line to a blanked row.
+Done when: a test feeds a made-up key through hall-pass's decision path and the audit line holds `[redacted]` in its place; after the owner approves the cleanup, `grep -c 'sk-ant-api03-\|sk-ant-usr-'` on the live audit log and its archives prints 0.
+Do not touch: revoking the leaked keys (the owner does that in each vendor's console); Claude Code's transcripts.
+Needs: nothing.
+Touches: src/audit.ts, src/decide.ts, their tests, the live audit log only on the owner's yes.
