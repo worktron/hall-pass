@@ -105,6 +105,16 @@ protected = ["**/my-secret"]
     expect(config.paths.read_only.some((p) => p.includes(".env"))).toBe(true);
   });
 
+  test("tracked source code is exempt from the name-only defaults until the user adds one", async () => {
+    process.env.HALL_PASS_CONFIG = resolve(tmpDir, "nonexistent.toml");
+    expect((await loadConfig()).paths.exempt_tracked_source_code).toEqual(["**/credentials*", "**/secret*"]);
+
+    const configPath = resolve(tmpDir, "config.toml");
+    await Bun.write(configPath, `[paths]\nprotected = ["**/secret*"]\n`);
+    process.env.HALL_PASS_CONFIG = configPath;
+    expect((await loadConfig()).paths.exempt_tracked_source_code).toEqual(["**/credentials*"]);
+  });
+
   test("expands ~ in paths", async () => {
     const configPath = resolve(tmpDir, "config.toml");
     await Bun.write(

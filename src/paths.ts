@@ -6,8 +6,9 @@
  */
 
 import type { HallPassConfig } from "./config.ts"
-import { expandTilde, NAME_ONLY_PROTECTED_PATHS, SOURCE_CODE_EXTENSIONS } from "./config.ts"
-import { extname, resolve } from "path"
+import { expandTilde, SOURCE_CODE_EXTENSIONS } from "./config.ts"
+import { gitTracksFile } from "./repo.ts"
+import { basename, dirname, extname, resolve } from "path"
 import type { CommandInfo } from "./parser.ts"
 
 export interface PathDecision {
@@ -69,6 +70,19 @@ function matchesPattern(filePath: string, pattern: string): boolean {
 }
 
 /**
+ * True when `filePath` is a source code file its repository tracks. A
+ * relative path is read against the hook's working directory, like every
+ * other path here; when that is the wrong place, git finds no such file and
+ * the path stays protected. One git call, made only for a path that already
+ * matched an exempt pattern.
+ */
+function isTrackedSourceCode(filePath: string): boolean {
+  if (!SOURCE_CODE_EXTENSIONS.has(extname(filePath).toLowerCase())) return false
+  const resolved = resolve(expandTilde(filePath))
+  return gitTracksFile(dirname(resolved), basename(resolved))
+}
+
+/**
  * Check a single file path against protection rules.
  */
 export function checkFilePath(
@@ -77,10 +91,11 @@ export function checkFilePath(
   config: HallPassConfig,
 ): PathDecision {
   // Check protected paths — block ALL operations
-  const sourceCode = SOURCE_CODE_EXTENSIONS.has(extname(filePath).toLowerCase())
+  const exempt = config.paths.exempt_tracked_source_code ?? []
+  let trackedSourceCode: boolean | undefined
   for (const pattern of config.paths.protected) {
-    if (sourceCode && NAME_ONLY_PROTECTED_PATHS.has(pattern)) continue
     if (matchesPattern(filePath, pattern)) {
+      if (exempt.includes(pattern) && (trackedSourceCode ??= isTrackedSourceCode(filePath))) continue
       return { allowed: false, reason: `matches protected path ${pattern}` }
     }
   }

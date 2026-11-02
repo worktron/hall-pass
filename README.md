@@ -66,7 +66,7 @@ Blocks Write/Edit tool calls and Bash commands that target sensitive files. Even
 
 Default protected paths (always active):
 - `**/.env`, `**/.env.*` — environment files
-- `**/credentials*`, `**/secret*` — credential files
+- `**/credentials*`, `**/secret*` — credential files. A source code file git tracks (`bin/secrets.ts`, `pkg/credentials.go`) is code that handles secrets, not a place they are kept, so these two skip it; an untracked one such as a gitignored `secrets.py` stays protected. Listing either pattern in your own config protects every match again.
 - `~/.ssh/**`, `~/.aws/**`, `~/.gnupg/**` — key directories
 - `**/*.pem`, `**/*id_rsa*` — key files
 
