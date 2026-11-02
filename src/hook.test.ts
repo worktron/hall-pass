@@ -1,6 +1,6 @@
-import { describe, test, expect } from "bun:test"
+import { afterAll, describe, test, expect } from "bun:test"
 import { resolve } from "path"
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { decide, type HookDecision } from "./decide.ts"
 import { loadConfig, type HallPassConfig } from "./config.ts"
@@ -518,6 +518,44 @@ describe("Write/Edit secret detection", () => {
       new_string: `-----BEGIN RSA PRIVATE KEY-----\nMIIEow...`,
       old_string: `// placeholder`,
     }))
+  })
+})
+
+describe("source code named secrets.ts, end to end", () => {
+  // A scratch repository that tracks bin/secrets.ts, as fleet does.
+  const repo = realpathSync(mkdtempSync(resolve(tmpdir(), "hall-pass-hook-repo-")))
+  mkdirSync(resolve(repo, "bin"))
+  writeFileSync(resolve(repo, "bin", "secrets.ts"), "export {}\n")
+  writeFileSync(resolve(repo, "bin", "secrets-draft.ts"), "export {}\n")
+  for (const args of [["init", "-q"], ["add", "bin/secrets.ts"]]) {
+    const r = Bun.spawnSync(["git", "-C", repo, ...args], { stdout: "ignore", stderr: "pipe" })
+    if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.toString()}`)
+  }
+  afterAll(() => rmSync(repo, { recursive: true, force: true }))
+  const secrets = resolve(repo, "bin", "secrets.ts")
+
+  test("Edit of a tracked secrets.ts → allow", async () => {
+    expectAllow(await runHookForTool("Edit", {
+      file_path: secrets,
+      old_string: `const q = v.match(/^(["'])(.*)\\1$/)`,
+      new_string: `const q = v.match(/^(["'])([\\s\\S]*)\\1$/)`,
+    }))
+  })
+
+  test("Edit of a tracked secrets.ts that pastes in a private key → prompt", async () => {
+    expectPrompt(await runHookForTool("Edit", {
+      file_path: secrets,
+      new_string: `-----BEGIN RSA PRIVATE KEY-----\nMIIEow...`,
+      old_string: `// placeholder`,
+    }))
+  })
+
+  test("Edit of an untracked secrets file → prompt", async () => {
+    expectPrompt(await runHookForTool("Edit", { file_path: resolve(repo, "bin", "secrets-draft.ts"), old_string: "a", new_string: "b" }))
+  })
+
+  test("Bash reading a tracked secrets.ts → allow", async () => {
+    expectAllow(await runHook(`wc -l ${secrets}; sed -n 1,60p ${secrets}`))
   })
 })
 

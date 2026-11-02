@@ -15,7 +15,18 @@ import { writeFile } from "fs/promises";
 export interface HallPassConfig {
   commands: { safe: string[]; db_clients: string[]; safe_scripts: string[] };
   git: { protected_branches: string[]; safe_subcommands: string[] };
-  paths: { protected: string[]; read_only: string[]; no_delete: string[] };
+  paths: {
+    protected: string[];
+    read_only: string[];
+    no_delete: string[];
+    /**
+     * Protected patterns that do not apply to a source code file git tracks
+     * (see isTrackedSourceCode in paths.ts). Derived, not read from config:
+     * the name-only defaults, minus any the user's config lists itself.
+     * Absent means every protected match holds.
+     */
+    exempt_tracked_source_code?: string[];
+  };
   audit: { enabled: boolean; path: string };
   debug: { enabled: boolean };
   /**
@@ -53,6 +64,23 @@ export const DEFAULT_PROTECTED_PATHS = [
   "**/*id_rsa*",
 ];
 
+/**
+ * The default patterns that match a file by its name alone. A file such as
+ * fleet's bin/secrets.ts is code that handles secrets, not a place they are
+ * kept, so these two skip a source code file that git tracks: what it holds
+ * is already in the repository's history. An untracked source file (a
+ * Django secrets.py kept out of the index) stays protected, and so does any
+ * data or shell file. A user who lists one of these patterns in their own
+ * config gets it back in full.
+ */
+export const DEFAULT_EXEMPT_TRACKED_SOURCE_CODE = ["**/credentials*", "**/secret*"];
+
+export const SOURCE_CODE_EXTENSIONS = new Set([
+  ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
+  ".py", ".rb", ".go", ".rs", ".swift", ".kt", ".java", ".scala",
+  ".c", ".h", ".cc", ".cpp", ".hpp", ".cs", ".m", ".php", ".ex", ".exs",
+]);
+
 /** Default read-only path patterns — reads allowed, writes/deletes blocked. */
 export const DEFAULT_READ_ONLY_PATHS = ["**/.env", "**/.env.*"];
 
@@ -63,6 +91,7 @@ const DEFAULT_CONFIG: HallPassConfig = {
     protected: DEFAULT_PROTECTED_PATHS,
     read_only: DEFAULT_READ_ONLY_PATHS,
     no_delete: [],
+    exempt_tracked_source_code: DEFAULT_EXEMPT_TRACKED_SOURCE_CODE,
   },
   audit: {
     // On by default: decision + outcome entries power `bun run stats`
@@ -92,6 +121,7 @@ function expandConfigPaths(config: HallPassConfig): HallPassConfig {
       protected: config.paths.protected.map(expandTilde),
       read_only: config.paths.read_only.map(expandTilde),
       no_delete: config.paths.no_delete.map(expandTilde),
+      exempt_tracked_source_code: config.paths.exempt_tracked_source_code,
     },
     audit: {
       ...config.audit,
@@ -142,6 +172,9 @@ function mergeConfig(
       protected: [...defaults.paths.protected, ...(paths?.protected ?? [])],
       read_only: [...defaults.paths.read_only, ...(paths?.read_only ?? [])],
       no_delete: [...defaults.paths.no_delete, ...(paths?.no_delete ?? [])],
+      exempt_tracked_source_code: (defaults.paths.exempt_tracked_source_code ?? []).filter(
+        (pattern) => !(paths?.protected ?? []).includes(pattern),
+      ),
     },
     audit: {
       enabled: (audit?.enabled as boolean) ?? defaults.audit.enabled,

@@ -1,9 +1,10 @@
-import { describe, test, expect } from "bun:test"
+import { afterAll, describe, test, expect } from "bun:test"
 import { checkFilePath, checkCommandPaths } from "./paths.ts"
-import type { HallPassConfig } from "./config.ts"
+import { DEFAULT_EXEMPT_TRACKED_SOURCE_CODE, DEFAULT_PROTECTED_PATHS, type HallPassConfig } from "./config.ts"
 import type { CommandInfo } from "./parser.ts"
-import { homedir } from "os"
-import { resolve } from "path"
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "fs"
+import { homedir, tmpdir } from "os"
+import { dirname, resolve } from "path"
 
 function makeConfig(overrides: Partial<HallPassConfig["paths"]> = {}): HallPassConfig {
   return {
@@ -13,6 +14,7 @@ function makeConfig(overrides: Partial<HallPassConfig["paths"]> = {}): HallPassC
       protected: overrides.protected ?? [],
       read_only: overrides.read_only ?? [],
       no_delete: overrides.no_delete ?? [],
+      exempt_tracked_source_code: overrides.exempt_tracked_source_code,
     },
     audit: { enabled: false, path: "/tmp/audit.jsonl" },
     debug: { enabled: false },
@@ -99,6 +101,60 @@ describe("checkFilePath", () => {
 
     expect(checkFilePath("/project/credentials.json", "write", config).allowed).toBe(false)
     expect(checkFilePath("/project/credentials", "read", config).allowed).toBe(false)
+  })
+
+  describe("source code named after secrets or credentials", () => {
+    // A scratch repository that tracks code named after secrets and one real
+    // data file, and leaves a Django-style secrets.py out of the index, the
+    // way a project keeps real values beside its code.
+    const repo = realpathSync(mkdtempSync(resolve(tmpdir(), "hall-pass-paths-")))
+    const git = (...args: string[]) => {
+      const r = Bun.spawnSync(["git", "-C", repo, ...args], { stdout: "ignore", stderr: "pipe" })
+      if (r.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr.toString()}`)
+    }
+    const tracked = ["bin/secrets.ts", "bin/secrets.test.ts", "pkg/credentials.go", "Sources/Credentials.swift", "secrets.json"]
+    const untracked = ["app/secrets.py", "web/credentials.php", "bin/secret_new.ts"]
+    git("init", "-q")
+    for (const file of [...tracked, ...untracked]) {
+      mkdirSync(dirname(resolve(repo, file)), { recursive: true })
+      writeFileSync(resolve(repo, file), "x\n")
+    }
+    git("add", ...tracked)
+    afterAll(() => rmSync(repo, { recursive: true, force: true }))
+
+    const defaults = makeConfig({
+      protected: DEFAULT_PROTECTED_PATHS,
+      exempt_tracked_source_code: DEFAULT_EXEMPT_TRACKED_SOURCE_CODE,
+    })
+
+    test("tracked source files are not secret stores", () => {
+      for (const file of ["bin/secrets.ts", "bin/secrets.test.ts", "pkg/credentials.go", "Sources/Credentials.swift"]) {
+        expect(checkFilePath(resolve(repo, file), "read", defaults)).toEqual({ allowed: true, reason: "" })
+        expect(checkFilePath(resolve(repo, file), "write", defaults)).toEqual({ allowed: true, reason: "" })
+      }
+    })
+
+    test("untracked source files stay protected: they may hold real values", () => {
+      for (const file of untracked) {
+        expect(checkFilePath(resolve(repo, file), "read", defaults).allowed).toBe(false)
+      }
+    })
+
+    test("data files stay protected, tracked or not", () => {
+      expect(checkFilePath(resolve(repo, "secrets.json"), "read", defaults).allowed).toBe(false)
+      for (const file of ["/nowhere/secrets.yaml", "/nowhere/secrets.sh", "/nowhere/secret.key", "/nowhere/credentials"]) {
+        expect(checkFilePath(file, "read", defaults).allowed).toBe(false)
+      }
+    })
+
+    test("source files outside any repository stay protected", () => {
+      expect(checkFilePath("/nowhere/bin/secrets.ts", "write", defaults).allowed).toBe(false)
+    })
+
+    test("with no exemption configured, every match stays protected", () => {
+      const strict = makeConfig({ protected: DEFAULT_PROTECTED_PATHS })
+      expect(checkFilePath(resolve(repo, "bin/secrets.ts"), "write", strict).allowed).toBe(false)
+    })
   })
 
   test("default protected paths catch .ssh", () => {
