@@ -19,3 +19,10 @@ Done when: a test feeds a made-up key through hall-pass's decision path and the 
 Do not touch: revoking the leaked keys (the owner does that in each vendor's console); Claude Code's transcripts.
 Needs: nothing.
 Touches: src/audit.ts, src/decide.ts, their tests, the live audit log only on the owner's yes.
+
+## railway-ssh-points-at-production-read · An agent reaching for a production database by hand is told about the read command
+Goal: fleet's `bun ~/Workspace/fleet/bin/production-read.ts "<one query>"` is how an agent reads an owned app's production Postgres, and hall-pass already allows it, but only one instruction line says so. An agent that misses that line tries `railway ssh` or `railway variables` with a database query, Claude Code's auto mode refuses it as a production read, and the agent is stuck where a Getter thread was on 2026-11-02. When hall-pass sees such a command, have it tell the agent about the read command along with whatever it decides. The first thing to find out is whether hall-pass can say something to the agent without changing the decision. It stays a pointer only: this does not allow or refuse anything new, and it never tells the agent to work around a refusal.
+Done when: a hall-pass test shows a `railway ssh` command carrying a database query getting the pointer text and the same decision as before, and a plain `railway ssh` with no database query getting neither.
+Do not touch: what hall-pass allows or refuses, the production read command itself.
+Needs: none.
+Touches: hall-pass's Bash evaluation and its tests.
