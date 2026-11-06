@@ -382,30 +382,22 @@ export const INSPECTORS: Record<string, Inspector> = {
     // assignments, so `env OP_ACCOUNT=x op read …` is judged like
     // `OP_ACCOUNT=x op read …`.
     //
-    // `-S`/`--split-string` splits its value into more of env's own words
-    // (assignments, then the command), so they are read in its place; quotes
-    // inside it stay part of the words, which only makes the command harder
-    // to allow. A flag env takes that is not listed here is a judgment call:
-    // it could be running a command hall-pass does not see.
+    // Any other flag is a judgment call: `-S` runs a command from a string,
+    // `-C` moves it to another directory, `-P` finds it on another path, and
+    // hall-pass does not follow any of them. When the words mention `op`, it
+    // is a hard stop like every 1Password read hall-pass cannot follow.
     const assigns: CommandInfo["assigns"] = []
-    const words = [...args]
     let afterDashes = false
-    for (let i = 1; i < words.length; i++) {
-      const arg = words[i]!
+    for (let i = 1; i < args.length; i++) {
+      const arg = args[i]!
       if (!afterDashes && arg.startsWith("-")) {
-        if (arg === "-i" || arg === "--ignore-environment" || arg === "-0" || arg === "--null" || arg === "-v") continue
-        if (arg === "-u" || arg === "--unset" || arg === "-P" || arg === "-C" || arg === "--chdir") { i++; continue }
-        if (arg.startsWith("-u") || arg.startsWith("--unset=") || arg.startsWith("-P") || arg.startsWith("-C") || arg.startsWith("--chdir=")) continue
-        if (arg === "-S" || arg === "--split-string" || arg.startsWith("-S") || arg.startsWith("--split-string=")) {
-          const value = arg === "-S" || arg === "--split-string" ? words[i + 1] : arg.slice(arg.startsWith("-S") ? 2 : "--split-string=".length)
-          if (value === undefined) return allow("env: no command")
-          words.splice(i, arg === "-S" || arg === "--split-string" ? 2 : 1, ...value.split(/\s+/).filter(Boolean))
-          i--
-          continue
-        }
+        if (arg === "-i" || arg === "--ignore-environment" || arg === "-0" || arg === "--null") continue
+        if (arg === "-u" || arg === "--unset") { i++; continue }
+        if (arg.startsWith("-u") || arg.startsWith("--unset=")) continue
         // `--` ends the flags; assignments and then the command follow.
         if (arg === "--") { afterDashes = true; continue }
-        return prompt(`env: ${arg}`, `"env ${arg}" is a flag hall-pass does not know`)
+        const mentionsOp = args.some((a) => a.includes("op://") || /(^|[\s"'/=;&|(])op([\s"';&|)]|$)/.test(a))
+        return { decision: "prompt", reason: `env: ${arg}`, message: `"env ${arg}" runs a command hall-pass does not follow`, hard: mentionsOp }
       }
 
       // VAR=val assignment — check for dangerous vars
@@ -419,7 +411,7 @@ export const INSPECTORS: Record<string, Inspector> = {
       }
 
       // First non-flag, non-assignment arg is the command
-      const subArgs = words.slice(i)
+      const subArgs = args.slice(i)
       const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns }
       return ctx.evaluate(subCmd)
     }
@@ -831,7 +823,8 @@ export const INSPECTORS: Record<string, Inspector> = {
     const [noun, verb, third] = words ?? []
     if (words !== null) {
       if (noun === undefined || noun === "whoami" || noun === "signout") return allow(`op: ${noun ?? "interactive"}`)
-      if (noun === "signin" && !args.includes("--raw")) return allow("op: signin")
+      // `--raw` prints a session token; a variable could be holding it.
+      if (noun === "signin" && !args.includes("--raw") && !opExpands(args)) return allow("op: signin")
       if (OP_META_NOUNS.has(noun) && (verb === undefined || verb === "list" || verb === "ls" || verb === "get")) {
         return allow(`op: ${noun} ${verb ?? ""}`.trim())
       }

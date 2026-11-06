@@ -318,6 +318,7 @@ describe("hook integration", () => {
         `op item get --vault Builds {Key,--vault=Personal} --reveal`,
         `F='credential --vault=Personal'; op item get Key --vault Builds --fields $F --reveal`,
         `env -S'X=1 op read op://Personal/Key/credential'`,
+        `env -S'"op" read op://Personal/Key/credential'`,
         `op run --env-file .env -- bun start`,
         `op read op://Builds/Key/credential && op item get Bank`,
       ]) {

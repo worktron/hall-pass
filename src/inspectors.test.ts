@@ -1589,17 +1589,19 @@ describe("evaluateBashCommand", () => {
       expectAllow(cmd("env", "--", "bun", "test"))
     })
 
-    test("env -S runs the command in its string, and that command is judged", () => {
-      expectPrompt(cmd("env", "-S", "X=1 rm -rf /"))
-      expectPrompt(cmd("env", "-SX=1 rm -rf /"))
-      expectPrompt(cmd("env", "--split-string=rm -rf /"))
-      expectAllow(cmd("env", "-S", "FOO=1 bun test"))
-      const hard = evaluateBashCommand(cmd("env", "-S", "X=1 op read op://Personal/Key/credential"), makeCtx())
-      expect(hard.decision === "prompt" && hard.hard).toBe(true)
-    })
-
-    test("an env flag hall-pass does not know is a judgment call", () => {
-      expectPrompt(cmd("env", "--frobnicate", "ls"))
+    test("env flags that run, move or find the command elsewhere are judgment calls, hard when they mention op", () => {
+      const judged = (...rest: string[]) => {
+        const r = evaluateBashCommand(cmd("env", ...rest), makeCtx())
+        return r.decision === "prompt" ? (r.hard ? "hard" : "judgment") : r.decision
+      }
+      expect(judged("-S", "X=1 rm -rf /")).toBe("judgment")
+      expect(judged("-C", "/Users/x/.config/hall-pass", "sed", "-i", "s/a/b/", "config.toml")).toBe("judgment")
+      expect(judged("-P", "/tmp/x", "ls")).toBe("judgment")
+      expect(judged("--frobnicate", "ls")).toBe("judgment")
+      expect(judged("-S", "X=1 op read op://Personal/Key/credential")).toBe("hard")
+      expect(judged("-SX='a b' op read op://Personal/Key/credential")).toBe("hard")
+      expect(judged("-S", `"op" read x`)).toBe("hard")
+      expect(judged("-C", "/tmp", "op", "item", "get", "Key")).toBe("hard")
     })
 
     test("env -- rm -rf / → prompt (the command after -- is judged, not skipped)", () => {
@@ -1779,6 +1781,7 @@ describe("evaluateBashCommand", () => {
         ["inject", "-i", "tpl"],
         ["item", "share", "GitHub"],
         ["signin", "--raw"],
+        ["signin", "$F"],
         ["service-account", "create", "bot"],
         ["connect", "token", "create", "x"],
       ]) expect([rest.join(" "), judged(makeCtx(), ...rest)]).toEqual([rest.join(" "), "hard"])
