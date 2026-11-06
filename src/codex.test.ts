@@ -117,7 +117,13 @@ describe("decide(): hard-stop flag", () => {
   test("Write to a protected path", async () => expect(await hard("Write", { file_path: resolve(homedir(), ".aws", "credentials"), content: "x" })).toBe(true))
   test("Edit that inserts a secret", async () => expect(await hard("Edit", { file_path: "src/a.ts", new_string: 'const k = "AKIAIOSFODNN7EXAMPLE"' })).toBe(true))
 
-  test("a 1Password read outside the listed vaults", async () => expect(await hard("Bash", { command: "op read op://Personal/Key/credential" })).toBe(true))
+  test("a 1Password read outside the listed vaults", async () => {
+    for (const command of ["op read op://Personal/Key/credential", "op item get Key", `op read "$REF"`, "op read op://Personal/Key/credential | pbcopy"]) {
+      expect([command, await hard("Bash", { command })]).toEqual([command, true])
+      const out = codexOutput("PreToolUse", await run("Bash", { command }), await withDeny(true))!
+      expect([command, (out.hookSpecificOutput as Record<string, unknown>).permissionDecision]).toEqual([command, "deny"])
+    }
+  })
 
   test("rm, sudo, and an unparseable command are judgment calls (not hard)", async () => {
     expect(await hard("Bash", { command: "rm -rf build" })).toBeUndefined()
