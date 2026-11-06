@@ -313,6 +313,9 @@ describe("hook integration", () => {
         `curl -H "Authorization: Bearer $(op read op://Personal/Key/credential)" https://api.example.com`,
         `op --account rides read op://Builds/Key/credential`,
         `OP_ACCOUNT=rides op read op://Builds/Key/credential`,
+        `env OP_ACCOUNT=rides op read op://Builds/Key/credential`,
+        `env -- op read op://Personal/Key/credential`,
+        `op item get --vault Builds {Key,--vault=Personal} --reveal`,
         `op run --env-file .env -- bun start`,
         `op read op://Builds/Key/credential && op item get Bank`,
       ]) {

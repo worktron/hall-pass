@@ -1589,6 +1589,11 @@ describe("evaluateBashCommand", () => {
       expectAllow(cmd("env", "--", "bun", "test"))
     })
 
+    test("env -- rm -rf / → prompt (the command after -- is judged, not skipped)", () => {
+      expectPrompt(cmd("env", "--", "rm", "-rf", "/"))
+      expectPrompt(cmd("env", "-i", "--", "FOO=bar", "rm", "-rf", "/"))
+    })
+
     test("env with only assignments, no command → allow", () => {
       expectAllow(cmd("env", "FOO=bar", "BAZ=qux"))
     })
@@ -1837,6 +1842,21 @@ describe("evaluateBashCommand", () => {
           ["item", "get", "Key", "--vault", "Builds", "--share-link"],
           ["item", "get", "Key", "--vault", "Builds", "--", "x"],
           ["item", "get", "Key", "--vault"],
+        ]) {
+          const result = decision(...rest)
+          expect([rest.join(" "), result.decision === "prompt" && result.hard]).toEqual([rest.join(" "), true])
+        }
+      })
+
+      test("a word the shell expands into more words is a hard stop", () => {
+        for (const rest of [
+          ["item", "get", "--vault", "Builds", "{Key,--vault=Personal}"],
+          ["item", "get", "--vault", "Builds", "Key", "--fields", "{credential,--vault=Personal}"],
+          ["item", "get", "--vault", "Builds", "*"],
+          ["item", "get", "--vault", "Builds", "Ke?"],
+          ["item", "get", "--vault", "Builds", "~"],
+          ["read", "op://Builds/{Key,Other}/credential"],
+          ["read", "op://Builds/Key/[c]redential"],
         ]) {
           const result = decision(...rest)
           expect([rest.join(" "), result.decision === "prompt" && result.hard]).toEqual([rest.join(" "), true])

@@ -221,11 +221,25 @@ function referenceVault(reference: string): string | null {
 /**
  * True when the command could reach another account or session than the
  * default: an account, config or session flag, or an `OP_` variable set in
- * front of it (`OP_ACCOUNT=x op read …`).
+ * front of it (`OP_ACCOUNT=x op read …`, `env OP_ACCOUNT=x op read …`).
+ * An `OP_` variable exported earlier on the line or inherited by the
+ * session is not seen: shfmt gives `export` as a declaration, not a
+ * command, and an inherited one is the user's own setup. fleet's op
+ * wrapper reads a listed-vault address with its service account either way.
  */
 function opElsewhere(cmdInfo: CommandInfo): boolean {
   if (cmdInfo.assigns.some((a) => a.name.startsWith("OP_"))) return true
   return cmdInfo.args.some((a) => OP_ACCOUNT_FLAGS.includes(flagName(a)))
+}
+
+/**
+ * Characters the shell expands into other words: a brace list or a glob
+ * (`{Key,--vault=Personal}`, `*`) can turn one word hall-pass reads as an
+ * item into a second `--vault` or `--account` flag. A `?` is allowed in an
+ * address, where every word it could match still starts with `op://`.
+ */
+function opExpands(args: string[]): boolean {
+  return args.some((a) => /[{}*[\]~]/.test(a) || (a.includes("?") && !a.startsWith("op://")))
 }
 
 /** `op [noun [verb]] --help`: help text only, every other word a plain word. */
@@ -363,13 +377,21 @@ export const INSPECTORS: Record<string, Inspector> = {
     // bare `env` prints environment — safe
     if (args.length === 1) return allow("env: prints environment")
 
+    // The variables env sets reach the command it runs as its own
+    // assignments, so `env OP_ACCOUNT=x op read …` is judged like
+    // `OP_ACCOUNT=x op read …`.
+    const assigns: CommandInfo["assigns"] = []
+    let afterDashes = false
     for (let i = 1; i < args.length; i++) {
       const arg = args[i]!
-      // Skip flags
-      if (arg === "-i" || arg === "--ignore-environment" || arg === "-0" || arg === "--null") continue
-      if (arg === "-u" || arg === "--unset") { i++; continue }
-      if (arg.startsWith("-u") || arg.startsWith("--unset=")) continue
-      if (arg === "--") { i++; /* next is command */ break }
+      if (!afterDashes) {
+        // Skip flags
+        if (arg === "-i" || arg === "--ignore-environment" || arg === "-0" || arg === "--null") continue
+        if (arg === "-u" || arg === "--unset") { i++; continue }
+        if (arg.startsWith("-u") || arg.startsWith("--unset=")) continue
+        // `--` ends the flags; assignments and then the command follow.
+        if (arg === "--") { afterDashes = true; continue }
+      }
 
       // VAR=val assignment — check for dangerous vars
       if (arg.includes("=")) {
@@ -377,12 +399,13 @@ export const INSPECTORS: Record<string, Inspector> = {
         if (DANGEROUS_ENV_VARS.has(varName)) {
           return prompt(`env: dangerous var ${varName}`, `Sets dangerous variable "${varName}"`)
         }
+        assigns.push({ name: varName, value: arg.slice(varName.length + 1) })
         continue
       }
 
       // First non-flag, non-assignment arg is the command
       const subArgs = args.slice(i)
-      const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns: [] }
+      const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns }
       return ctx.evaluate(subCmd)
     }
 
@@ -778,7 +801,7 @@ export const INSPECTORS: Record<string, Inspector> = {
     if (reference !== null && readable_references.includes(reference)) {
       return { decision: "allow", reason: "op read: listed in [op] readable_references", grant: true }
     }
-    if (!opElsewhere(cmdInfo)) {
+    if (!opElsewhere(cmdInfo) && !opExpands(args)) {
       const vault = reference === null ? null : referenceVault(reference)
       if (vault !== null && vaultListed(vault, readable_vaults)) {
         return { decision: "allow", reason: "op read: vault listed in [op] readable_vaults", grant: true }
