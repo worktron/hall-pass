@@ -26,3 +26,10 @@ Done when: a hall-pass test shows a `railway ssh` command carrying a database qu
 Do not touch: what hall-pass allows or refuses, the production read command itself.
 Needs: none.
 Touches: hall-pass's Bash evaluation and its tests.
+
+## env-split-string-push · A protected-branch push inside `env -S` is a hard stop
+
+Goal: `env -S 'git push origin main'` gets the same hard stop as `git push origin main`. Today the env inspector (src/inspectors.ts, the `env` entry, as of main 4b85c61) makes every env flag it does not list (`-S`, `-C`, `-P`) a judgment call, a hard stop only when the words mention op, so in auto mode the push goes to Claude Code's classifier and the protected-branch check in src/git.ts never runs. Main before 4b85c61 abstained on it the same way. An earlier attempt split the `-S` string on whitespace and judged the command inside; quoted words in the string then hid the command, so it was dropped (hall-pass PR #59 review, 2026-11-06). Read the string the way env does (quotes, backslashes, `${VAR}`), or hard-stop any `-S` whose words name git push to a protected branch.
+Done when: a test shows `env -S 'git push origin main'` and `env -S'X=1 git push --force origin main'` are hard stops in auto mode, and `env -S 'bun test'` is not.
+Do not touch: how `env -- <command>` and `env VAR=x <command>` are judged.
+Touches: src/inspectors.ts (env), src/inspectors.test.ts, src/hook.test.ts.
