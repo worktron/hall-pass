@@ -233,13 +233,14 @@ function opElsewhere(cmdInfo: CommandInfo): boolean {
 }
 
 /**
- * Characters the shell expands into other words: a brace list or a glob
- * (`{Key,--vault=Personal}`, `*`) can turn one word hall-pass reads as an
- * item into a second `--vault` or `--account` flag. A `?` is allowed in an
+ * Characters the shell expands into other words: a brace list, a glob or
+ * an unquoted variable or command substitution (`{Key,--vault=Personal}`,
+ * `*`, `--fields $F`) can turn one word hall-pass reads as an item or a
+ * flag's value into a second `--vault` or `--account` flag. A `?` is allowed in an
  * address, where every word it could match still starts with `op://`.
  */
 function opExpands(args: string[]): boolean {
-  return args.some((a) => /[{}*[\]~]/.test(a) || (a.includes("?") && !a.startsWith("op://")))
+  return args.some((a) => /[{}*[\]~$`]/.test(a) || (a.includes("?") && !a.startsWith("op://")))
 }
 
 /** `op [noun [verb]] --help`: help text only, every other word a plain word. */
@@ -380,21 +381,35 @@ export const INSPECTORS: Record<string, Inspector> = {
     // The variables env sets reach the command it runs as its own
     // assignments, so `env OP_ACCOUNT=x op read …` is judged like
     // `OP_ACCOUNT=x op read …`.
+    //
+    // `-S`/`--split-string` splits its value into more of env's own words
+    // (assignments, then the command), so they are read in its place; quotes
+    // inside it stay part of the words, which only makes the command harder
+    // to allow. A flag env takes that is not listed here is a judgment call:
+    // it could be running a command hall-pass does not see.
     const assigns: CommandInfo["assigns"] = []
+    const words = [...args]
     let afterDashes = false
-    for (let i = 1; i < args.length; i++) {
-      const arg = args[i]!
-      if (!afterDashes) {
-        // Skip flags
-        if (arg === "-i" || arg === "--ignore-environment" || arg === "-0" || arg === "--null") continue
-        if (arg === "-u" || arg === "--unset") { i++; continue }
-        if (arg.startsWith("-u") || arg.startsWith("--unset=")) continue
+    for (let i = 1; i < words.length; i++) {
+      const arg = words[i]!
+      if (!afterDashes && arg.startsWith("-")) {
+        if (arg === "-i" || arg === "--ignore-environment" || arg === "-0" || arg === "--null" || arg === "-v") continue
+        if (arg === "-u" || arg === "--unset" || arg === "-P" || arg === "-C" || arg === "--chdir") { i++; continue }
+        if (arg.startsWith("-u") || arg.startsWith("--unset=") || arg.startsWith("-P") || arg.startsWith("-C") || arg.startsWith("--chdir=")) continue
+        if (arg === "-S" || arg === "--split-string" || arg.startsWith("-S") || arg.startsWith("--split-string=")) {
+          const value = arg === "-S" || arg === "--split-string" ? words[i + 1] : arg.slice(arg.startsWith("-S") ? 2 : "--split-string=".length)
+          if (value === undefined) return allow("env: no command")
+          words.splice(i, arg === "-S" || arg === "--split-string" ? 2 : 1, ...value.split(/\s+/).filter(Boolean))
+          i--
+          continue
+        }
         // `--` ends the flags; assignments and then the command follow.
         if (arg === "--") { afterDashes = true; continue }
+        return prompt(`env: ${arg}`, `"env ${arg}" is a flag hall-pass does not know`)
       }
 
       // VAR=val assignment — check for dangerous vars
-      if (arg.includes("=")) {
+      if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(arg)) {
         const varName = arg.split("=")[0]!
         if (DANGEROUS_ENV_VARS.has(varName)) {
           return prompt(`env: dangerous var ${varName}`, `Sets dangerous variable "${varName}"`)
@@ -404,7 +419,7 @@ export const INSPECTORS: Record<string, Inspector> = {
       }
 
       // First non-flag, non-assignment arg is the command
-      const subArgs = args.slice(i)
+      const subArgs = words.slice(i)
       const subCmd: CommandInfo = { name: subArgs[0]!, args: subArgs, assigns }
       return ctx.evaluate(subCmd)
     }
@@ -807,7 +822,7 @@ export const INSPECTORS: Record<string, Inspector> = {
         return { decision: "allow", reason: "op read: vault listed in [op] readable_vaults", grant: true }
       }
       const itemGet = opItemGet(args)
-      if (itemGet !== null && !itemGet.item.includes("$") && vaultListed(itemGet.vault, readable_vaults)) {
+      if (itemGet !== null && vaultListed(itemGet.vault, readable_vaults)) {
         return { decision: "allow", reason: "op item get: vault listed in [op] readable_vaults", grant: true }
       }
     }

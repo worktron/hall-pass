@@ -1589,6 +1589,19 @@ describe("evaluateBashCommand", () => {
       expectAllow(cmd("env", "--", "bun", "test"))
     })
 
+    test("env -S runs the command in its string, and that command is judged", () => {
+      expectPrompt(cmd("env", "-S", "X=1 rm -rf /"))
+      expectPrompt(cmd("env", "-SX=1 rm -rf /"))
+      expectPrompt(cmd("env", "--split-string=rm -rf /"))
+      expectAllow(cmd("env", "-S", "FOO=1 bun test"))
+      const hard = evaluateBashCommand(cmd("env", "-S", "X=1 op read op://Personal/Key/credential"), makeCtx())
+      expect(hard.decision === "prompt" && hard.hard).toBe(true)
+    })
+
+    test("an env flag hall-pass does not know is a judgment call", () => {
+      expectPrompt(cmd("env", "--frobnicate", "ls"))
+    })
+
     test("env -- rm -rf / → prompt (the command after -- is judged, not skipped)", () => {
       expectPrompt(cmd("env", "--", "rm", "-rf", "/"))
       expectPrompt(cmd("env", "-i", "--", "FOO=bar", "rm", "-rf", "/"))
@@ -1857,6 +1870,9 @@ describe("evaluateBashCommand", () => {
           ["item", "get", "--vault", "Builds", "~"],
           ["read", "op://Builds/{Key,Other}/credential"],
           ["read", "op://Builds/Key/[c]redential"],
+          ["item", "get", "Key", "--vault", "Builds", "--fields", "$F"],
+          ["item", "get", "Key", "--vault", "Builds", "--fields=$(printf x)"],
+          ["item", "get", "Key", "--vault", "Builds", "--format", "`echo json`"],
         ]) {
           const result = decision(...rest)
           expect([rest.join(" "), result.decision === "prompt" && result.hard]).toEqual([rest.join(" "), true])
