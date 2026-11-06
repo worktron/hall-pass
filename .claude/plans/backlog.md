@@ -33,3 +33,9 @@ Goal: `env -S 'git push origin main'` gets the same hard stop as `git push origi
 Done when: a test shows `env -S 'git push origin main'` and `env -S'X=1 git push --force origin main'` are hard stops in auto mode, and `env -S 'bun test'` is not.
 Do not touch: how `env -- <command>` and `env VAR=x <command>` are judged.
 Touches: src/inspectors.ts (env), src/inspectors.test.ts, src/hook.test.ts.
+
+## op-question-names-the-command · The 1Password question names the command, never a flag's value
+
+Goal: when hall-pass asks about an `op` command, its question names the command (`op read`, `op item get`), never a flag's value. Today `op --account rides read op://agents/x/credential` asks `"op: rides" can reveal a 1Password secret`: the label takes the first word that does not start with `-` (src/inspectors.ts, the op inspector's `shownNoun, shownVerb` line, main 4b85c61), which is the account name. The decision is right; only the words are wrong. Build the label from the same argument walker that finds the command (`opCommandWords`), falling back to "op" when the walker cannot follow the flags.
+Done when: a test shows the question for `op --account rides read op://agents/x/credential` says "op: read", and for `op --format json item get Key` says "op: item get".
+Touches: src/inspectors.ts (op), src/inspectors.test.ts.
