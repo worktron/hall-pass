@@ -210,7 +210,14 @@ function evaluateSteps(rawCmdInfo: CommandInfo, ctx: EvalContext, onUnknownPath:
     return { decision: "prompt", reason: `dangerous: ${name}`, message: `"${name}" is a destructive command` }
   }
 
-  // 8. Unknown command → pass (no opinion, let Claude Code decide)
+  // 8. A command named by a variable nobody can read (`$OP read op://…`)
+  //    that is handed a 1Password address: it could be op reading any
+  //    vault, out of the op inspector's sight, so it is the same hard stop.
+  if (name.includes("$") && cmdInfo.args.slice(1).some((a) => a.includes("op://"))) {
+    return { decision: "prompt", reason: "op: command held in a variable", message: `"${name}" is held in a variable hall-pass cannot read and is given a 1Password address; it asks every time`, hard: true }
+  }
+
+  // 9. Unknown command → pass (no opinion, let Claude Code decide)
   return { decision: "pass", reason: `unknown: ${name}` }
 }
 

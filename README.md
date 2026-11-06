@@ -231,6 +231,8 @@ deny_hard_stops = true
 [op]
 # 1Password references "op read" may read without a prompt, as exact text.
 readable_references = ["op://Example/Read-only key/credential"]
+# Vaults, by name in any case, whose secrets may be read without a prompt.
+readable_vaults = ["Example agents"]
 
 [debug]
 # Enable debug output to stderr
@@ -239,20 +241,23 @@ enabled = true
 
 User config values **extend** built-in defaults — they never replace them.
 
-### Reading listed 1Password references
+### Reading 1Password secrets
 
-hall-pass asks before every `op read`, since it hands a secret to the agent. `[op] readable_references` lists the references that may be read without asking, each written out in full and matched as exact text: `op read 'op://Example/Read-only key/credential'` is allowed, alone, inside `$(...)` (`curl -H "Authorization: Bearer $(op read '…')" https://…`) or as `KEY=$(op read '…') && curl …`, with the reason `op read: listed in [op] readable_references`. The rest of the line is judged as usual.
+hall-pass treats every `op` command that can hand a secret to the agent as a hard stop: it asks in every permission mode, auto mode included, and Codex refuses it. That covers `op read`, `op item get`, `op document get`, `op run`, `op inject`, `op item share`, `op signin --raw`, commands that print a new token, and any `op` command whose words hall-pass cannot follow (a flag it does not know before the command, a command name held in a variable that is given an `op://` address). Metadata that returns no secret (`op whoami`, `op signin`, `op vault list`, `op item list`, `op item template get`, `op account get`, `--help`) is allowed, and changes to a vault (`op item create`, `edit`, `delete`, `move`) are a judgment call like `rm`.
 
-The read keeps its prompt when anything about it is not plain:
-- a reference that is not listed, or is listed in another spelling (case, an extra path segment, a `?attribute=` suffix);
-- a reference held in a variable (`op read "$REF"`);
-- a second reference;
-- `--out-file`/`-o`, `--file-mode`, `--force`, or any flag other than `--account <plain name>`, `-n`/`--no-newline`, `--no-color`, `--cache` and `--iso-timestamps`;
-- an `--account` value the shell could expand (`$A`, braces, globs).
+Two settings in the global config let reads through without asking.
 
-Every other `op` command is unchanged: `op item get`, `op run` and `op inject` still ask, even for a listed item.
+`[op] readable_vaults` lists vaults, by name in any case, that may be read freely: `op read 'op://Example agents/Key/credential'` and `op item get Key --vault 'Example agents'` are allowed, alone, inside `$(...)` or piped onward, with the reason `op read: vault listed in [op] readable_vaults`. The rest of the line is judged as usual. A read of a listed vault still asks when hall-pass cannot prove where it lands:
+- an address or item held in a variable (`op read "$REF"`, `op read "op://Example agents/$ITEM/credential"`);
+- an `op item get` with no `--vault`, two of them, an item read from input (`-`) or given as a link;
+- `--account`, `--config`, `--session` or an `OP_` variable set in front of the command, since the same vault name can belong to another account;
+- `--out-file`/`-o`, `--file-mode`, `--force`, `--share-link`, or any flag hall-pass does not know.
 
-Listing a reference means agents may know its value. A listed read's output can go anywhere the line sends it (any host, a pipe, a `>` redirect), and a bare read shows the value to the agent. So list only keys whose leak costs little: read-only and revocable. The list is read only from the global config file; a repository's `.hall-pass` cannot add to it.
+`[op] readable_references` lists single references, written out in full and matched as exact text, that `op read` may read without asking in any vault: `op read 'op://Example/Read-only key/credential'` is allowed, with the reason `op read: listed in [op] readable_references`. It keeps its prompt for a reference in another spelling (case, an extra path segment, a `?attribute=` suffix), a reference held in a variable, a second reference, an `--account` value the shell could expand, and any flag other than `--account <plain name>`, `-n`/`--no-newline`, `--no-color`, `--cache` and `--iso-timestamps`.
+
+Listing a vault or a reference means agents may know what it holds. A listed read's output can go anywhere the line sends it (any host, a pipe, a `>` redirect), and a bare read shows the value to the agent. So list only vaults and keys whose leak costs little: a vault a read-only service account reads, or a revocable key. Both lists are read only from the global config file; a repository's `.hall-pass` cannot add to them, and a command or an edit that writes the global config file is itself a hard stop.
+
+hall-pass sees only the command line. A script or an inline program that runs `op` itself is judged as that script, not as the read inside it.
 
 ## Debug mode
 

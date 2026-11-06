@@ -25,7 +25,7 @@ const TEST_CONFIG: HallPassConfig = {
   classifier: { defer: true },
   codex: { deny_hard_stops: true },
   debug: { enabled: false },
-  op: { readable_references: [] },
+  op: { readable_references: [], readable_vaults: [] },
 }
 
 function cmd(name: string, ...rest: string[]): CommandInfo {

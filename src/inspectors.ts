@@ -121,6 +121,120 @@ function opRead(args: string[]): string | null {
   return read && positionals.length === 1 ? positionals[0]! : null
 }
 
+/** Global `op` flags that take a value, as `--flag value` or `--flag=value`. */
+const OP_GLOBAL_VALUE_FLAGS = new Set(["--account", "--config", "--encoding", "--format", "--session"])
+
+/** Global `op` flags that take no value. */
+const OP_GLOBAL_PLAIN_FLAGS = new Set([...OP_PLAIN_FLAGS, "--debug", "--version", "-v"])
+
+/** Flags that send a command to another account or session, where a listed vault name can be another vault. */
+const OP_ACCOUNT_FLAGS = ["--account", "--config", "--session"]
+
+/** Nouns and verbs that change a vault's contents: a judgment call, not a read. */
+const OP_WRITE_NOUNS = new Set(["item", "document", "vault", "user", "group"])
+const OP_WRITE_VERBS = new Set(["create", "edit", "delete", "move"])
+
+/** Nouns whose command is two words (`op item get`); `op read`, `op run` and `op inject` are one. */
+const OP_TWO_WORD_NOUNS = new Set(["item", "document", "vault", "user", "group", "account", "connect", "events-api", "plugin", "service-account"])
+
+/** Nouns whose `list`/`ls`/`get` return names and settings, never a secret. */
+const OP_META_NOUNS = new Set(["account", "vault", "user", "group", "connect", "events-api"])
+
+/** The name of a flag as written, without an `=value`. */
+const flagName = (arg: string): string => arg.startsWith("--") && arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg
+
+/**
+ * The first three words of an `op` command that are not flags (its noun,
+ * verb, and the word after; fewer when a flag hall-pass does not know comes
+ * after the verb), or null when a flag before the verb is one hall-pass
+ * does not know, a known flag is missing its value, or `--`
+ * appears: then a flag's value could be standing where the command seems
+ * to be (`op --config whoami read …` runs `read`, not `whoami`).
+ */
+function opCommandWords(args: string[]): string[] | null {
+  const words: string[] = []
+  for (let i = 1; i < args.length && words.length < 3; i++) {
+    const arg = args[i]!
+    if (!arg.startsWith("-")) { words.push(arg); continue }
+    const name = flagName(arg)
+    if (OP_GLOBAL_VALUE_FLAGS.has(name)) {
+      if (arg === name && ++i >= args.length) return null
+      continue
+    }
+    if (OP_GLOBAL_PLAIN_FLAGS.has(arg)) continue
+    // Past the noun and verb, a command's own flags no longer decide which
+    // command runs; before them, an unknown flag could be hiding it.
+    return words.length >= 2 ? words : null
+  }
+  return words
+}
+
+/** `op item get` flags that take a value, and those that take none. */
+const OP_ITEM_GET_VALUE_FLAGS = new Set([...OP_GLOBAL_VALUE_FLAGS, "--vault", "--fields"])
+const OP_ITEM_GET_PLAIN_FLAGS = new Set([...OP_GLOBAL_PLAIN_FLAGS, "--reveal", "--otp", "--include-archive"])
+
+/**
+ * The vault and item of `op item get <item> --vault <vault>`, or null when
+ * the words are anything else: a flag hall-pass does not know, no vault or
+ * two, no item or two, an item read from input (`-`), a share link (`://`),
+ * or `--`.
+ */
+function opItemGet(args: string[]): { vault: string; item: string } | null {
+  const positionals: string[] = []
+  const vaults: string[] = []
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i]!
+    if (!arg.startsWith("-") || arg === "-") { positionals.push(arg); continue }
+    const name = flagName(arg)
+    if (OP_ITEM_GET_VALUE_FLAGS.has(name)) {
+      const value = arg === name ? args[++i] : arg.slice(name.length + 1)
+      if (value === undefined) return null
+      if (name === "--vault") vaults.push(value)
+      continue
+    }
+    if (OP_ITEM_GET_PLAIN_FLAGS.has(arg)) continue
+    return null
+  }
+  if (positionals.length !== 3 || positionals[0] !== "item" || positionals[1] !== "get" || vaults.length !== 1) return null
+  const item = positionals[2]!
+  if (item === "-" || item.includes("://")) return null
+  return { vault: vaults[0]!, item }
+}
+
+/** ASCII-only lower case: a non-ASCII letter never folds into an ASCII one. */
+const asciiLower = (s: string): string => s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32))
+
+/** True when `vault` is written out (no variable) and listed in `[op] readable_vaults`, in any case. */
+function vaultListed(vault: string, listed: string[]): boolean {
+  if (!/^[A-Za-z0-9 ._-]+$/.test(vault)) return false
+  return listed.some((v) => asciiLower(v) === asciiLower(vault))
+}
+
+/** The vault an `op://<vault>/<item>/…` address names, or null when it is not one written out. */
+function referenceVault(reference: string): string | null {
+  if (!reference.startsWith("op://") || reference.includes("$")) return null
+  const rest = reference.slice("op://".length)
+  const slash = rest.indexOf("/")
+  return slash > 0 ? rest.slice(0, slash) : null
+}
+
+/**
+ * True when the command could reach another account or session than the
+ * default: an account, config or session flag, or an `OP_` variable set in
+ * front of it (`OP_ACCOUNT=x op read …`).
+ */
+function opElsewhere(cmdInfo: CommandInfo): boolean {
+  if (cmdInfo.assigns.some((a) => a.name.startsWith("OP_"))) return true
+  return cmdInfo.args.some((a) => OP_ACCOUNT_FLAGS.includes(flagName(a)))
+}
+
+/** `op [noun [verb]] --help`: help text only, every other word a plain word. */
+function opHelp(args: string[]): boolean {
+  const rest = args.slice(1)
+  const help = rest.filter((a) => a === "-h" || a === "--help")
+  return help.length === 1 && rest.every((a) => a === help[0] || (!a.startsWith("-") && !a.includes("$")))
+}
+
 /** pkill and killall: a judgment call, unless the words only list signals or ask for help. */
 function killByPattern(cmdInfo: CommandInfo): EvalResult {
   const rest = cmdInfo.args.slice(1)
@@ -648,36 +762,59 @@ export const INSPECTORS: Record<string, Inspector> = {
     return prompt(`security: ${subcmd}`, `"security ${subcmd}" accesses or modifies Keychain data`)
   },
 
-  // 1Password CLI. Allow read-only metadata; prompt on anything that exposes
-  // secret values (item get, read, document get), mutates vaults, or runs
-  // commands with injected secrets (run, inject). Default is prompt — a
-  // secrets manager should fail closed. The one exception is an `op read` of
-  // a reference the user listed in `[op] readable_references` (opRead).
+  // 1Password CLI. A thread may read secrets freely only from the vaults the
+  // user lists in `[op] readable_vaults` (global config only), or the exact
+  // addresses in `[op] readable_references`. Metadata that returns no secret
+  // is allowed; changes to a vault stay a judgment call. Everything else,
+  // every read that cannot be proven to land in a listed vault included, is
+  // a hard stop: it asks in every mode, and Codex refuses it. A secrets
+  // manager fails closed.
   op: (cmdInfo, ctx) => {
     const args = cmdInfo.args
+    const { readable_references, readable_vaults } = ctx.config.op
+    if (opHelp(args)) return allow("op: help")
+
     const reference = opRead(args)
-    if (reference !== null && ctx.config.op.readable_references.includes(reference)) {
+    if (reference !== null && readable_references.includes(reference)) {
       return { decision: "allow", reason: "op read: listed in [op] readable_references", grant: true }
     }
-    // First positional after "op" is the noun/command; second is the verb.
-    const positionals = args.slice(1).filter((a) => !a.startsWith("-"))
-    const noun = positionals[0]
-    const verb = positionals[1]
+    if (!opElsewhere(cmdInfo)) {
+      const vault = reference === null ? null : referenceVault(reference)
+      if (vault !== null && vaultListed(vault, readable_vaults)) {
+        return { decision: "allow", reason: "op read: vault listed in [op] readable_vaults", grant: true }
+      }
+      const itemGet = opItemGet(args)
+      if (itemGet !== null && !itemGet.item.includes("$") && vaultListed(itemGet.vault, readable_vaults)) {
+        return { decision: "allow", reason: "op item get: vault listed in [op] readable_vaults", grant: true }
+      }
+    }
 
-    // No subcommand (interactive/auth) or auth-only commands — safe.
-    if (noun === undefined || noun === "whoami" || noun === "signin" || noun === "signout") {
-      return allow(`op: ${noun ?? "interactive"}`)
+    const words = opCommandWords(args)
+    const [noun, verb, third] = words ?? []
+    if (words !== null) {
+      if (noun === undefined || noun === "whoami" || noun === "signout") return allow(`op: ${noun ?? "interactive"}`)
+      if (noun === "signin" && !args.includes("--raw")) return allow("op: signin")
+      if (OP_META_NOUNS.has(noun) && (verb === undefined || verb === "list" || verb === "ls" || verb === "get")) {
+        return allow(`op: ${noun} ${verb ?? ""}`.trim())
+      }
+      if (noun === "item" && (verb === "list" || verb === "ls")) return allow(`op: item ${verb}`)
+      if (noun === "item" && verb === "template" && (third === "list" || third === "ls" || third === "get")) {
+        return allow(`op: item template ${third}`)
+      }
+      if (OP_WRITE_NOUNS.has(noun) && verb !== undefined && OP_WRITE_VERBS.has(verb)) {
+        const label = `op: ${noun} ${verb}`
+        return prompt(label, `"${label}" changes a 1Password vault`)
+      }
     }
-    // Metadata listings/queries that never return secret values.
-    const META_NOUNS = new Set(["account", "vault", "user", "group", "connect", "events-api"])
-    if (META_NOUNS.has(noun) && (verb === "list" || verb === "get" || verb === undefined)) {
-      return allow(`op: ${noun} ${verb ?? ""}`.trim())
-    }
-    if (noun === "item" && verb === "list") {
-      return allow("op: item list")
-    }
-    const label = `op: ${noun}${verb ? " " + verb : ""}`
-    return prompt(label, `"${label}" may expose secrets, mutate vaults, or run commands`)
+
+    // The label names the command as written, for the question and the audit log.
+    const [shownNoun, shownVerb] = args.slice(1).filter((a) => !a.startsWith("-"))
+    const label = shownNoun === undefined ? "op" : `op: ${shownNoun}${shownVerb && OP_TWO_WORD_NOUNS.has(shownNoun) ? " " + shownVerb : ""}`
+    const listed = readable_vaults.length > 0
+      ? `Only reads from the vaults in [op] readable_vaults (${readable_vaults.join(", ")}), written out in full with no --account, skip this question.`
+      : "No vault is listed in [op] readable_vaults, so every read asks."
+    const hint = noun === "item" && verb === "get" && readable_vaults.length > 0 ? ` If the item is in one of them, add --vault ${readable_vaults[0]}.` : ""
+    return { decision: "prompt", reason: label, message: `"${label}" can reveal a 1Password secret. ${listed}${hint}`, hard: true }
   },
 
   // yt-dlp media downloader. Network fetch + file writes are in the same risk
