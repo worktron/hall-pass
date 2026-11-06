@@ -46,11 +46,13 @@ export interface HallPassConfig {
   codex: { deny_hard_stops: boolean };
   /**
    * readable_references: 1Password references (`op://vault/item/field`,
-   * matched as exact text) that `op read` may read without a prompt. Read
-   * only from the global config, never from a repository's `.hall-pass`.
-   * See the op inspector.
+   * matched as exact text) that `op read` may read without a prompt.
+   * readable_vaults: vaults (by name, any case) whose secrets `op read` and
+   * `op item get --vault` may read without a prompt; every other read of a
+   * secret is a hard stop. Both are read only from the global config, never
+   * from a repository's `.hall-pass`. See the op inspector.
    */
-  op: { readable_references: string[] };
+  op: { readable_references: string[]; readable_vaults: string[] };
 }
 
 /** Default protected path patterns — always active even without config. */
@@ -102,7 +104,7 @@ const DEFAULT_CONFIG: HallPassConfig = {
   debug: { enabled: false },
   classifier: { defer: true },
   codex: { deny_hard_stops: true },
-  op: { readable_references: [] },
+  op: { readable_references: [], readable_vaults: [] },
 };
 
 /** Expand ~ to the user's home directory in a path string. */
@@ -194,6 +196,10 @@ function mergeConfig(
         ...defaults.op.readable_references,
         ...readableReferences(op?.readable_references),
       ],
+      readable_vaults: [
+        ...defaults.op.readable_vaults,
+        ...readableVaults(op?.readable_vaults),
+      ],
     },
   };
 }
@@ -210,8 +216,20 @@ function readableReferences(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === "string" && v.startsWith("op://") && !v.includes("$"));
 }
 
+/**
+ * The entries of a readable_vaults value that can name a vault: the letters,
+ * digits, spaces, `.`, `_` and `-` 1Password allows in a name. Anything else
+ * (an empty string, a `/`, a `$`, a non-ASCII letter that case folding could
+ * turn into an ASCII one) is dropped, so the setting never matches more than
+ * the vault it names.
+ */
+function readableVaults(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === "string" && /^[A-Za-z0-9 ._-]+$/.test(v));
+}
+
 /** Resolve the global config file path. */
-function getConfigPath(): string {
+export function getConfigPath(): string {
   return (
     process.env.HALL_PASS_CONFIG ??
     resolve(homedir(), ".config", "hall-pass", "config.toml")
@@ -270,6 +288,10 @@ export async function loadConfig(): Promise<HallPassConfig> {
     // A repository does not get to name your secrets: [op] is global only.
     if (projectParsed) result = mergeConfig(result, { ...projectParsed, op: undefined });
   }
+
+  // The global config grants what threads may do without asking (vaults they
+  // may read, scripts they may run), so a thread may not write it unasked.
+  result = { ...result, paths: { ...result.paths, read_only: [...result.paths.read_only, getConfigPath()] } };
 
   return expandConfigPaths(result);
 }
@@ -340,6 +362,13 @@ export function generateDefaultConfig(): string {
 # (read-only and revocable). Read only from this file, never from a
 # repository's .hall-pass.
 # readable_references = ["op://Example/Read-only key/credential"]
+# Vaults, by name in any case, whose secrets "op read op://<vault>/..." and
+# "op item get <item> --vault <vault>" may read without a prompt. Every other
+# read of a secret (another vault, an "op item get" with no --vault, an
+# address held in a variable, a read that names an --account, op run, op
+# inject) asks in every mode. List only vaults that hold keys whose leak
+# costs little, such as a vault a read-only service account reads.
+# readable_vaults = ["Example agents"]
 
 [debug]
 # Enable debug output to stderr

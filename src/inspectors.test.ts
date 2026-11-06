@@ -14,7 +14,7 @@ const TEST_CONFIG: HallPassConfig = {
   paths: { protected: [], read_only: [], no_delete: [] },
   audit: { enabled: false, path: "" },
   debug: { enabled: false },
-  op: { readable_references: [] },
+  op: { readable_references: [], readable_vaults: [] },
 }
 
 import { resolve } from "path"
@@ -1589,6 +1589,26 @@ describe("evaluateBashCommand", () => {
       expectAllow(cmd("env", "--", "bun", "test"))
     })
 
+    test("env flags that run, move or find the command elsewhere are judgment calls, hard when they mention op", () => {
+      const judged = (...rest: string[]) => {
+        const r = evaluateBashCommand(cmd("env", ...rest), makeCtx())
+        return r.decision === "prompt" ? (r.hard ? "hard" : "judgment") : r.decision
+      }
+      expect(judged("-S", "X=1 rm -rf /")).toBe("judgment")
+      expect(judged("-C", "/Users/x/.config/hall-pass", "sed", "-i", "s/a/b/", "config.toml")).toBe("judgment")
+      expect(judged("-P", "/tmp/x", "ls")).toBe("judgment")
+      expect(judged("--frobnicate", "ls")).toBe("judgment")
+      expect(judged("-S", "X=1 op read op://Personal/Key/credential")).toBe("hard")
+      expect(judged("-SX='a b' op read op://Personal/Key/credential")).toBe("hard")
+      expect(judged("-S", `"op" read x`)).toBe("hard")
+      expect(judged("-C", "/tmp", "op", "item", "get", "Key")).toBe("hard")
+    })
+
+    test("env -- rm -rf / → prompt (the command after -- is judged, not skipped)", () => {
+      expectPrompt(cmd("env", "--", "rm", "-rf", "/"))
+      expectPrompt(cmd("env", "-i", "--", "FOO=bar", "rm", "-rf", "/"))
+    })
+
     test("env with only assignments, no command → allow", () => {
       expectAllow(cmd("env", "FOO=bar", "BAZ=qux"))
     })
@@ -1746,18 +1766,142 @@ describe("evaluateBashCommand", () => {
     test("op item list → allow", () => expectAllow(cmd("op", "item", "list")))
     test("op user list → allow", () => expectAllow(cmd("op", "user", "list")))
 
-    test("op item get → prompt (secret retrieval)", () => expectPrompt(cmd("op", "item", "get", "GitHub")))
-    test("op read → prompt (secret retrieval)", () => expectPrompt(cmd("op", "read", "op://vault/item/field")))
-    test("op document get → prompt", () => expectPrompt(cmd("op", "document", "get", "doc")))
-    test("op run → prompt (executes command with injected secrets)", () =>
-      expectPrompt(cmd("op", "run", "--", "env")))
-    test("op inject → prompt", () => expectPrompt(cmd("op", "inject", "-i", "tpl")))
-    test("op item create → prompt (mutation)", () => expectPrompt(cmd("op", "item", "create")))
-    test("op item delete → prompt (mutation)", () => expectPrompt(cmd("op", "item", "delete", "x")))
+    /** The decision and whether it is a hard stop. */
+    const judged = (ctx: EvalContext, ...rest: string[]) => {
+      const r = evaluateBashCommand(cmd("op", ...rest), ctx)
+      return r.decision === "prompt" ? (r.hard ? "hard" : "judgment") : r.decision
+    }
+
+    test("reading a secret with no vault listed is a hard stop", () => {
+      for (const rest of [
+        ["item", "get", "GitHub"],
+        ["read", "op://vault/item/field"],
+        ["document", "get", "doc"],
+        ["run", "--", "env"],
+        ["inject", "-i", "tpl"],
+        ["item", "share", "GitHub"],
+        ["signin", "--raw"],
+        ["signin", "$F"],
+        ["service-account", "create", "bot"],
+        ["connect", "token", "create", "x"],
+      ]) expect([rest.join(" "), judged(makeCtx(), ...rest)]).toEqual([rest.join(" "), "hard"])
+    })
+
+    test("changes to a vault stay a judgment call", () => {
+      for (const rest of [["item", "create"], ["item", "delete", "x"], ["item", "edit", "x"], ["item", "move", "x"], ["vault", "create", "v"]]) {
+        expect(judged(makeCtx(), ...rest)).toBe("judgment")
+      }
+    })
+
+    test("help, listings and templates are allowed", () => {
+      for (const rest of [
+        ["read", "--help"], ["item", "create", "--help"], ["service-account", "create", "-h"],
+        ["item", "ls"], ["vault", "ls"], ["item", "template", "list"], ["item", "template", "get", "Login"],
+        ["--account", "rides", "vault", "list"],
+        ["--version"], ["-v"],
+      ]) expect([rest.join(" "), judged(makeCtx(), ...rest)]).toEqual([rest.join(" "), "allow"])
+    })
+
+    test("a flag's value is never taken for the command", () => {
+      for (const rest of [
+        ["--config", "whoami", "read", "op://Other/x/y"],
+        ["--session", "signin", "item", "get", "X", "--reveal"],
+        ["--format", "vault", "list", "read", "op://Other/x/y"],
+        ["item", "--vault", "list", "get", "X"],
+        ["--unknown", "whoami", "read", "op://Other/x/y"],
+        ["read", "op://Other/x/y", "--help", "--out-file", "f"],
+      ]) expect([rest.join(" "), judged(makeCtx(), ...rest)]).toEqual([rest.join(" "), "hard"])
+    })
+
+    describe("[op] readable_vaults", () => {
+      const vaultsCtx = () => createEvalContext({ ...TEST_CONFIG, op: { readable_references: [], readable_vaults: ["Example agents", "Builds"] } }, [], shfmtBin)
+      const decision = (...rest: string[]) => evaluateBashCommand(cmd("op", ...rest), vaultsCtx())
+
+      test("a read of a listed vault, in any case, is allowed and names the setting", () => {
+        expect(decision("read", "op://Example agents/Key/credential")).toEqual({ decision: "allow", reason: "op read: vault listed in [op] readable_vaults", grant: true })
+        for (const rest of [
+          ["read", "op://example AGENTS/Key/credential"],
+          ["read", "-n", "op://Builds/Key/credential"],
+          ["read", "op://Builds/Key/section/field?attribute=otp"],
+        ]) expect(decision(...rest).decision).toBe("allow")
+      })
+
+      test("an item get naming a listed vault is allowed", () => {
+        expect(decision("item", "get", "Key", "--vault", "Builds")).toEqual({ decision: "allow", reason: "op item get: vault listed in [op] readable_vaults", grant: true })
+        for (const rest of [
+          ["item", "get", "Key", "--vault=builds", "--fields", "credential", "--reveal"],
+          ["item", "get", "--vault", "Example agents", "Key", "--format", "json"],
+          ["item", "get", "Key", "--vault", "Builds", "--otp"],
+        ]) expect(decision(...rest).decision).toBe("allow")
+      })
+
+      test("every read that cannot be proven to land in a listed vault is a hard stop", () => {
+        for (const rest of [
+          ["read", "op://Personal/Key/credential"],
+          ["read", "op://Builds-old/Key/credential"],
+          ["read", "op://$VAULT/Key/credential"],
+          ["read", "op://Builds/$ITEM/credential"],
+          ["read", "OP://Builds/Key/credential"],
+          ["read", "op://Builds"],
+          ["read", "--out-file", "k.txt", "op://Builds/Key/credential"],
+          ["read", "--account", "rides", "op://Builds/Key/credential"],
+          ["--account", "rides", "read", "op://Builds/Key/credential"],
+          ["item", "get", "Key"],
+          ["item", "get", "Key", "--vault", "Personal"],
+          ["item", "get", "Key", "--vault", "Builds", "--vault", "Personal"],
+          ["item", "get", "-", "--vault", "Builds"],
+          ["item", "get", "https://start.1password.com/open/i?v=x", "--vault", "Builds"],
+          ["item", "get", "$ITEM", "--vault", "Builds"],
+          ["item", "get", "Key", "Other", "--vault", "Builds"],
+          ["item", "get", "Key", "--vault", "Builds", "--account", "rides"],
+          ["item", "get", "Key", "--vault", "Builds", "--session", "token"],
+          ["item", "get", "Key", "--vault", "Builds", "--share-link"],
+          ["item", "get", "Key", "--vault", "Builds", "--", "x"],
+          ["item", "get", "Key", "--vault"],
+        ]) {
+          const result = decision(...rest)
+          expect([rest.join(" "), result.decision === "prompt" && result.hard]).toEqual([rest.join(" "), true])
+        }
+      })
+
+      test("a word the shell expands into more words is a hard stop", () => {
+        for (const rest of [
+          ["item", "get", "--vault", "Builds", "{Key,--vault=Personal}"],
+          ["item", "get", "--vault", "Builds", "Key", "--fields", "{credential,--vault=Personal}"],
+          ["item", "get", "--vault", "Builds", "*"],
+          ["item", "get", "--vault", "Builds", "Ke?"],
+          ["item", "get", "--vault", "Builds", "~"],
+          ["read", "op://Builds/{Key,Other}/credential"],
+          ["read", "op://Builds/Key/[c]redential"],
+          ["item", "get", "Key", "--vault", "Builds", "--fields", "$F"],
+          ["item", "get", "Key", "--vault", "Builds", "--fields=$(printf x)"],
+          ["item", "get", "Key", "--vault", "Builds", "--format", "`echo json`"],
+        ]) {
+          const result = decision(...rest)
+          expect([rest.join(" "), result.decision === "prompt" && result.hard]).toEqual([rest.join(" "), true])
+        }
+      })
+
+      test("an OP_ variable set in front of the read is a hard stop", () => {
+        const result = evaluateBashCommand({ name: "op", args: ["op", "read", "op://Builds/Key/credential"], assigns: [{ name: "OP_ACCOUNT", value: "rides" }] }, vaultsCtx())
+        expect(result.decision === "prompt" && result.hard).toBe(true)
+      })
+
+      test("a vault name that is not a plain 1Password name never matches", () => {
+        const odd = createEvalContext({ ...TEST_CONFIG, op: { readable_references: [], readable_vaults: ["", "k"] } }, [], shfmtBin)
+        expect(evaluateBashCommand(cmd("op", "read", "op:///Key/credential"), odd).decision).toBe("prompt")
+        expect(evaluateBashCommand(cmd("op", "read", "op://\u212a/Key/credential"), odd).decision).toBe("prompt")
+      })
+
+      test("the hard stop for an item get with no vault says which vault to name", () => {
+        const result = decision("item", "get", "Key")
+        expect(result.decision === "prompt" && result.message).toContain("add --vault Example agents")
+      })
+    })
 
     describe("[op] readable_references", () => {
       const LISTED = "op://Example/Read-only key/credential"
-      const listedCtx = () => createEvalContext({ ...TEST_CONFIG, op: { readable_references: [LISTED] } }, [], shfmtBin)
+      const listedCtx = () => createEvalContext({ ...TEST_CONFIG, op: { readable_references: [LISTED], readable_vaults: [] } }, [], shfmtBin)
       const decision = (...rest: string[]) => evaluateBashCommand(cmd("op", ...rest), listedCtx())
 
       test("a listed reference reads with no prompt, and the reason names the setting", () => {

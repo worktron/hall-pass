@@ -79,6 +79,7 @@ enabled = true
     expect(config.paths.read_only).toEqual([
       ...DEFAULT_READ_ONLY_PATHS,
       "**/config/prod/**",
+      configPath,
     ]);
     expect(config.paths.no_delete).toEqual(["**/migrations/**"]);
 
@@ -203,6 +204,25 @@ enabled = true
     expect(config.op.readable_references).toEqual(["op://Example/Read-only key/credential"]);
   });
 
+  test("[op] readable_vaults keeps only plain 1Password vault names", async () => {
+    const configPath = resolve(tmpDir, "config.toml");
+    await writeFile(
+      configPath,
+      `[op]\nreadable_vaults = ["Example agents", "Builds", "", "a/b", "$V", 7, "\u212a"]\n`,
+    );
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
+    expect(config.op.readable_vaults).toEqual(["Example agents", "Builds"]);
+  });
+
+  test("the global config file is read-only to commands", async () => {
+    const configPath = resolve(tmpDir, "config.toml");
+    await writeFile(configPath, `[commands]\nsafe = ["terraform"]\n`);
+    process.env.HALL_PASS_CONFIG = configPath;
+    const config = await loadConfig();
+    expect(config.paths.read_only).toContain(configPath);
+  });
+
   test("a malformed [op] readable_references is dropped, not an error", async () => {
     for (const value of [`"op://Example/Read-only key/credential"`, `7`, `{ ref = "op://Example/k/f" }`]) {
       const configPath = resolve(tmpDir, "config.toml");
@@ -221,7 +241,7 @@ enabled = true
     await mkdir(resolve(repo, ".git"), { recursive: true });
     await writeFile(
       resolve(repo, ".hall-pass"),
-      `[commands]\nsafe = ["terraform"]\n\n[op]\nreadable_references = ["op://Private/bank/password"]\n`,
+      `[commands]\nsafe = ["terraform"]\n\n[op]\nreadable_references = ["op://Private/bank/password"]\nreadable_vaults = ["Private"]\n`,
     );
 
     const originalCwd = process.cwd();
@@ -230,6 +250,7 @@ enabled = true
       const config = await loadConfig();
       expect(config.commands.safe).toContain("terraform");
       expect(config.op.readable_references).toEqual([]);
+      expect(config.op.readable_vaults).toEqual([]);
     } finally {
       process.chdir(originalCwd);
     }
