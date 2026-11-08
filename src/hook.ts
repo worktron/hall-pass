@@ -112,5 +112,5 @@ const debug = createDebug(config)
 const audit = createAudit(config, ctx)
 const shfmtBin = findShfmt()
 
-const decision = await decide(toolName, toolInput, { config, shfmtBin, debug, audit, mode: ctx.mode, cwd })
+const decision = await decide(toolName, toolInput, { config, shfmtBin, debug, audit, mode: ctx.mode, cwd, metamaxHome: process.env.METAMAX_HOME })
 emit(decision)

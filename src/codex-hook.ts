@@ -89,6 +89,7 @@ const decision = await decide(toolName, toolInput, {
   audit: event === "PreToolUse" ? audit : silentAudit,
   mode: ctx.mode,
   cwd,
+  metamaxHome: process.env.METAMAX_HOME,
 })
 
 const output = codexOutput(event, decision, config)

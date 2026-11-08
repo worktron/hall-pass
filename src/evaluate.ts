@@ -5,7 +5,7 @@
  * through `evaluateBashCommand`. This replaces the scattered checks in
  * hook.ts with a single pipeline:
  *
- *   1. unwrapCommand()                     — nohup, nice, timeout
+ *   1. unwrapCommand()                     — nohup, nice, timeout, metamax's heavy-run.sh
  *   2. check env vars (DANGEROUS_ENV_VARS) — LD_PRELOAD etc.
  *   3. checkCommandFeedback(cmd, pipeline) — per-command feedback rules
  *   4. path check (only PATH_AWARE cmds)   — cat, rm, cp, mv, chmod...
@@ -135,7 +135,7 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
   // A path held in an unreadable variable only stops a command that would
   // otherwise go through; every other verdict already involves a review.
   if (unknownPath && (result.decision === "allow" || result.decision === "feedback")) {
-    const name = unwrapCommand(rawCmdInfo).name
+    const name = unwrapCommand(rawCmdInfo, ctx.scope).name
     return {
       decision: "prompt",
       reason: `path-unknown: ${name} ${unknownPath}`,
@@ -147,8 +147,10 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
 }
 
 function evaluateSteps(rawCmdInfo: CommandInfo, ctx: EvalContext, onUnknownPath: (arg: string) => void): EvalResult {
-  // 1. Unwrap transparent wrappers (nohup, nice, timeout)
-  const cmdInfo = unwrapCommand(rawCmdInfo)
+  // 1. Unwrap transparent wrappers (nohup, nice, timeout, metamax's heavy-run
+  //    script). First, so the repository-script rule below never allows
+  //    `bash scripts/heavy-run.sh <anything>` without judging the anything.
+  const cmdInfo = unwrapCommand(rawCmdInfo, ctx.scope)
   const { name } = cmdInfo
 
   // 2. Check env var assignments for dangerous variables

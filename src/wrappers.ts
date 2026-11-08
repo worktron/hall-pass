@@ -8,6 +8,8 @@
  */
 
 import type { CommandInfo } from "./parser.ts"
+import type { Scope } from "./places.ts"
+import { isTopOfSameRepository } from "./repo.ts"
 
 /**
  * Given the args after the wrapper name, return the index where
@@ -65,11 +67,69 @@ const TRANSPARENT_WRAPPERS = new Map<string, FlagSkipper>([
 ])
 
 /**
+ * True when `word`, the path a command line gives a script, is metamax's
+ * heavy-run script: `$METAMAX_HOME/scripts/heavy-run.sh` (the variable read
+ * as the hook's own value, which scope.metamaxHome holds only when nothing
+ * on the line can have changed it), that path written out, or
+ * `scripts/heavy-run.sh` run from the top folder of a checkout of metamax's
+ * own repository (every place the line could be standing in). A file that
+ * only shares the name is not it: another repository's heavy-run.sh could
+ * do anything.
+ */
+function isMetamaxHeavyRun(word: string, scope: Scope): boolean {
+  const home = scope.metamaxHome
+  if (!home) return false
+  const written = word.replace(/^\$(METAMAX_HOME(?!\w)|\{METAMAX_HOME\})/, home)
+  if (written === `${home}/scripts/heavy-run.sh`) return true
+  if (word !== "scripts/heavy-run.sh" && word !== "./scripts/heavy-run.sh") return false
+  return scope.places !== null && scope.places.every((place) => isTopOfSameRepository(place, home))
+}
+
+/** Shells that run metamax's heavy-run script as a file: `bash "$METAMAX_HOME/scripts/heavy-run.sh" …`. */
+const SCRIPT_SHELLS = new Set(["bash", "sh", "zsh"])
+
+/**
+ * The command metamax's heavy-run script runs, or null when `cmdInfo` is not
+ * that script. heavy-run.sh waits for a machine-wide place for a test suite
+ * and then runs its arguments, so it changes when the command runs, not what
+ * it does. It takes one flag, `--landing`; any other flag before the command
+ * is one hall-pass does not know, and the line is judged as written. Run by a
+ * shell, only the plain `bash <script> …` form counts, with no shell flags.
+ * The inner command is named as the parser would name it typed bare.
+ */
+function heavyRunInner(cmdInfo: CommandInfo, scope: Scope): CommandInfo | null {
+  const first = cmdInfo.path ?? cmdInfo.args[0]!
+  let rest: string[]
+  if (first.split("/").pop() === "heavy-run.sh" && isMetamaxHeavyRun(first, scope)) {
+    rest = cmdInfo.args.slice(1)
+  } else if (SCRIPT_SHELLS.has(cmdInfo.name) && cmdInfo.args[1] !== undefined && isMetamaxHeavyRun(cmdInfo.args[1], scope)) {
+    rest = cmdInfo.args.slice(2)
+  } else {
+    return null
+  }
+  if (rest[0] === "--landing") rest = rest.slice(1)
+  if (rest.length === 0 || rest[0]!.startsWith("-")) return null
+  const word = rest[0]!
+  const name = word.split("/").pop()!
+  return {
+    name,
+    args: [name, ...rest.slice(1)],
+    ...(word !== name && { path: word }),
+    assigns: cmdInfo.assigns,
+  }
+}
+
+/**
  * If the command is a transparent wrapper, unwrap it to get the real
  * inner command. Recurses to handle nesting (e.g., nohup nice bun ...).
- * Returns the original CommandInfo if it's not a wrapper.
+ * Returns the original CommandInfo if it's not a wrapper. metamax's
+ * heavy-run script is looked through only with a scope, which says where
+ * metamax lives and where the line stands.
  */
-export function unwrapCommand(cmdInfo: CommandInfo): CommandInfo {
+export function unwrapCommand(cmdInfo: CommandInfo, scope?: Scope): CommandInfo {
+  const heavy = scope ? heavyRunInner(cmdInfo, scope) : null
+  if (heavy) return unwrapCommand(heavy, scope)
+
   const skipper = TRANSPARENT_WRAPPERS.get(cmdInfo.name)
   if (!skipper) return cmdInfo
 
@@ -89,7 +149,7 @@ export function unwrapCommand(cmdInfo: CommandInfo): CommandInfo {
   }
 
   // Recurse to handle nesting
-  return unwrapCommand(innerCmd)
+  return unwrapCommand(innerCmd, scope)
 }
 
 /** Exported for testing */
