@@ -167,7 +167,7 @@ export async function runEval(entries: AuditEntry[], replay: ReplayFn): Promise<
 export async function makeDecideReplay(): Promise<ReplayFn> {
   const config = await loadConfig()
   const shfmtBin = findShfmt()
-  const deps = { config, shfmtBin, debug: () => {}, audit: { log() {}, event() {} } }
+  const deps = { config, shfmtBin, debug: () => {}, audit: { log() {}, event() {} }, metamaxHome: process.env.METAMAX_HOME }
 
   return async (tool, input, mode) => {
     let toolInput: Record<string, unknown>

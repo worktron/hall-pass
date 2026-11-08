@@ -42,6 +42,8 @@ export interface LiteralVar {
   value: string
   /** Offset where the assigning statement ends: a read before it sees the inherited value. */
   after: number
+  /** The value comes from the hook's own environment, and the script must never write the variable (writesUnnamed). */
+  inherited?: boolean
 }
 
 export type LiteralVars = ReadonlyMap<string, LiteralVar>
@@ -148,8 +150,26 @@ function leadingAssignments(stmt: Node): { stmts: Node[]; whole: boolean } {
 }
 
 /** True when the scan shows a way the variable can be written other than its one assignment. */
-function dropped(scan: WriterScan, name: string): boolean {
-  return scan.assigns.get(name) !== 1 || scan.doubted.has(name) || scan.writerText.some((text) => text.includes(name))
+function dropped(scan: WriterScan, name: string, inherited = false): boolean {
+  return scan.assigns.get(name) !== (inherited ? undefined : 1) || scan.doubted.has(name) || scan.writerText.some((text) => text.includes(name))
+}
+
+/**
+ * True when the script can write a variable its text does not name (the
+ * scanWriters question), given variables it inherits from the hook's own
+ * environment with a known value. A command word that reads one
+ * (`$METAMAX_HOME/scripts/heavy-run.sh`) is then a path, as `$S/loop.sh` is
+ * for a literal S, instead of a name that could split into `eval`. A value
+ * that would split or glob unquoted is not known, and an inherited variable
+ * the script assigns or writes anywhere makes the answer true.
+ */
+export function writesUnnamed(ast: unknown, inherited: ReadonlyMap<string, string> = new Map()): boolean {
+  const known = candidates(ast)
+  for (const [name, value] of inherited) {
+    if (known.has(name) || !value.startsWith("/") || /[\s\\~*?[]/.test(value)) continue
+    known.set(name, { value, after: -1, inherited: true })
+  }
+  return scanWriters(ast, known).unbounded
 }
 
 interface WriterScan {
@@ -267,7 +287,7 @@ export function scanWriters(ast: unknown, known: LiteralVars = candidates(ast)):
 
   walk(ast)
   if (scan.writerText.some((text) => text.includes("IFS"))) scan.unbounded = true
-  for (const name of reliedOn) if (dropped(scan, name)) scan.unbounded = true
+  for (const name of reliedOn) if (dropped(scan, name, known.get(name)?.inherited)) scan.unbounded = true
   return scan
 }
 

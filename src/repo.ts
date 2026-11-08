@@ -122,6 +122,24 @@ export function gitTracksFile(dir: string, path: string): boolean {
   return gitQuery(dir, ["ls-files", "--error-unmatch", "--", path]) !== null
 }
 
+/**
+ * True when `dir` is the top folder of a checkout of the same repository as
+ * `home`: its own top level, sharing `home`'s git common directory, so the
+ * main checkout and every worktree of it count, a subfolder does not.
+ */
+export function isTopOfSameRepository(dir: string, home: string): boolean {
+  const top = gitTopLevel(dir)
+  if (!top || canonical(top) !== canonical(dir)) return false
+  const common = gitCommonDir(dir)
+  return common !== null && common === gitCommonDir(home)
+}
+
+/** The repository's shared git directory (the main checkout's `.git`), canonical; null outside one. */
+function gitCommonDir(dir: string): string | null {
+  const out = gitQuery(dir, ["rev-parse", "--path-format=absolute", "--git-common-dir"])
+  return out ? canonical(out) : null
+}
+
 /** The `worktreeSetup` commands of `metamax.json` at `top`, or null when absent. */
 export function readWorktreeSetup(top: string): string[] | null {
   try {

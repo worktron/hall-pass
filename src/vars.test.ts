@@ -6,7 +6,7 @@
 import { describe, test, expect } from "bun:test"
 import { resolve } from "path"
 import { existsSync } from "fs"
-import { literalVariables, ARITHMETIC_TESTS } from "./vars.ts"
+import { literalVariables, writesUnnamed, ARITHMETIC_TESTS } from "./vars.ts"
 import { extractCommandInfos, extractRedirects, extractPipeTargets } from "./parser.ts"
 
 const bundledShfmt = resolve(import.meta.dir, "..", "bin", "shfmt")
@@ -202,4 +202,28 @@ describe("assignments that start a top-level && chain", () => {
       expect(known(line).f).toBeUndefined()
     })
   }
+})
+
+describe("writesUnnamed with a variable the hook knows", () => {
+  const home = new Map([["H", "/Users/x/metamax"]])
+
+  test("an unquoted command word under a known inherited variable runs a file", () => {
+    expect(writesUnnamed(parse("$H/scripts/run.sh bun test"))).toBe(true)
+    expect(writesUnnamed(parse("$H/scripts/run.sh bun test"), home)).toBe(false)
+  })
+
+  test("a line that assigns or writes the inherited variable is unbounded", () => {
+    for (const line of ["export H=/tmp/x; $H/scripts/run.sh", "read H; $H/scripts/run.sh", "for H in /a /b; do $H/scripts/run.sh; done", "H=/tmp/x; unset H; $H/scripts/run.sh"]) {
+      expect(writesUnnamed(parse(line), home)).toBe(true)
+    }
+  })
+
+  test("a value that would split or glob is not known", () => {
+    expect(writesUnnamed(parse("$H/scripts/run.sh"), new Map([["H", "/a b"]]))).toBe(true)
+    expect(writesUnnamed(parse("$H/scripts/run.sh"), new Map([["H", "/a*"]]))).toBe(true)
+  })
+
+  test("anything else that makes a line unbounded still does", () => {
+    expect(writesUnnamed(parse("eval x; $H/scripts/run.sh"), home)).toBe(true)
+  })
 })

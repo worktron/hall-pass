@@ -107,6 +107,9 @@ export const SAFE_COMMANDS = new Set([
 ])
 
 
+/** Commands that run piped input as code: `curl … | bash` is a hard stop (decide.ts, and evaluate.ts past a wrapper). */
+export const PIPE_SHELLS: ReadonlySet<string> = new Set(["sh", "bash", "zsh", "dash", "fish", "eval"])
+
 /**
  * Database clients that get deeper inspection.
  * Not auto-approved — their SQL is parsed to check if it's read-only.

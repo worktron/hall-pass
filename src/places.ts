@@ -25,18 +25,24 @@ import { isAbsolute } from "path"
 import { BINARY, type CommandInfo } from "./parser.ts"
 import { expandTilde } from "./config.ts"
 import { unwrapCommand } from "./wrappers.ts"
-import { scanWriters } from "./vars.ts"
+import { writesUnnamed } from "./vars.ts"
 
 export interface Scope {
   /** Every directory a relative path may be resolved against; null when a directory change cannot be placed. */
   places: string[] | null
   /** True when `$TMPDIR` is the hook's own TMPDIR: nothing in the script, or around it, can have set it. */
   tmpdirTrusted: boolean
+  /**
+   * Where metamax lives (the hook's own METAMAX_HOME), when nothing in the
+   * script, or around it, can have changed the variable; null otherwise or
+   * outside metamax. wrappers.ts reads it to know metamax's heavy-run script.
+   */
+  metamaxHome: string | null
 }
 
 /** A script with nothing around it: it starts in the hook's cwd, with the hook's environment. */
-export function rootScope(cwd?: string): Scope {
-  return { places: cwd ? [cwd] : null, tmpdirTrusted: true }
+export function rootScope(cwd?: string, metamaxHome?: string): Scope {
+  return { places: cwd ? [cwd] : null, tmpdirTrusted: true, metamaxHome: metamaxHome?.replace(/(.)\/+$/, "$1") || null }
 }
 
 type Node = Record<string, unknown>
@@ -49,7 +55,8 @@ type Node = Record<string, unknown>
 export function scopeOf(outer: Scope, ast: unknown, commands: CommandInfo[], text: string): Scope {
   return {
     places: placesOf(outer.places, ast, commands),
-    tmpdirTrusted: outer.tmpdirTrusted && !writesTmpdir(ast, text),
+    tmpdirTrusted: outer.tmpdirTrusted && !writesVariable("TMPDIR", ast, text),
+    metamaxHome: outer.metamaxHome !== null && !writesVariable("METAMAX_HOME", ast, text, outer.metamaxHome) ? outer.metamaxHome : null,
   }
 }
 
@@ -132,13 +139,16 @@ function leadsWithCd(ast: unknown): boolean {
 }
 
 /**
- * True when the script may set TMPDIR. Any mention of the name other than a
- * plain `$TMPDIR` or `${TMPDIR}` counts (`TMPDIR=x`, `TMPDIR=x rm …`,
- * `export`, `read`, `for … in`, `unset`, `${TMPDIR:=x}`), and so does a
- * script that can write a variable its text does not name (scanWriters:
- * `eval`, `declare $V=…`, arithmetic). A false positive costs only a prompt.
+ * True when the script may set the variable `name` (TMPDIR, METAMAX_HOME).
+ * Any mention of the name other than a plain `$NAME` or `${NAME}` counts
+ * (`NAME=x`, `NAME=x rm …`, `export`, `read`, `for … in`, `unset`,
+ * `${NAME:=x}`), and so does a script that can write a variable its text
+ * does not name (writesUnnamed: `eval`, `declare $V=…`, arithmetic). A false
+ * positive costs only a prompt. `inherited` is the value the script starts
+ * with, when the hook knows it: an unquoted `$METAMAX_HOME/scripts/x.sh` then
+ * runs a file rather than a command name that could split into `eval`.
  */
-function writesTmpdir(ast: unknown, text: string): boolean {
-  const others = text.replace(/\$TMPDIR(?!\w)|\$\{TMPDIR\}/g, "")
-  return others.includes("TMPDIR") || scanWriters(ast).unbounded
+function writesVariable(name: string, ast: unknown, text: string, inherited?: string): boolean {
+  const reads = new RegExp(`\\$${name}(?!\\w)|\\$\\{${name}\\}`, "g")
+  return text.replace(reads, "").includes(name) || writesUnnamed(ast, inherited ? new Map([[name, inherited]]) : undefined)
 }

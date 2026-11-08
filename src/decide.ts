@@ -18,6 +18,7 @@ import type { AuditLogger } from "./audit.ts"
 import { checkFilePath } from "./paths.ts"
 import { checkFeedbackRules } from "./feedback.ts"
 import { createEvalContext, evaluateBashCommand, type EvalContext, type EvalResult } from "./evaluate.ts"
+import { PIPE_SHELLS } from "./safelist.ts"
 import { literalVariables } from "./vars.ts"
 import { rootScope, scopeOf } from "./places.ts"
 import { detectSecret } from "./secrets.ts"
@@ -53,6 +54,8 @@ export interface DecideDeps {
   mode?: string
   /** The hook input's `cwd`: where the command runs. Git rules that look at the repository need it. */
   cwd?: string
+  /** Where metamax lives, the hook's own METAMAX_HOME; with it, metamax's heavy-run script is looked through (wrappers.ts). */
+  metamaxHome?: string
 }
 
 /**
@@ -269,7 +272,6 @@ export async function decide(
   }
 
   // Pipe target inspection — genuine `curl | bash`, NOT `&&`/`||` chains.
-  const PIPE_SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "eval"])
   for (const name of extractPipeTargets(ast, known)) {
     if (PIPE_SHELLS.has(name)) {
       debug("pipe-target", { name })
@@ -323,7 +325,7 @@ export async function decide(
   }
 
   // -- Per-command evaluation --
-  const scope = scopeOf(rootScope(deps.cwd), ast, commandInfos, command)
+  const scope = scopeOf(rootScope(deps.cwd, deps.metamaxHome), ast, commandInfos, command)
   const ctx = createEvalContext(config, commandInfos, shfmtBin, deps.cwd, scope)
   const strictCtx: EvalContext = { ...ctx, strictPlaceholders: true, evaluate: (cmd) => evaluateBashCommand(cmd, strictCtx) }
 
@@ -408,8 +410,11 @@ function evaluateWithValues(cmdInfo: CommandInfo, values: PossibleValues, ctx: E
 
 /** The command with its variables replaced by candidate values; empty when none of its words change. */
 function commandVariants(cmdInfo: CommandInfo, values: PossibleValues): CommandInfo[] {
-  const options = cmdInfo.args.map((arg) => substitute(arg, values))
-  if (options.every((o, i) => o.length === 1 && o[0] === cmdInfo.args[i])) return []
+  // The first word as written, folder included, so a variant still knows
+  // `$METAMAX_HOME/scripts/heavy-run.sh` for the wrapper it is (wrappers.ts).
+  const words = cmdInfo.path === undefined ? cmdInfo.args : [cmdInfo.path, ...cmdInfo.args.slice(1)]
+  const options = words.map((arg) => substitute(arg, values))
+  if (options.every((o, i) => o.length === 1 && o[0] === words[i])) return []
 
   let combos: string[][] = [[]]
   for (const opts of options) {
@@ -424,7 +429,8 @@ function commandVariants(cmdInfo: CommandInfo, values: PossibleValues): CommandI
   }
   return combos.map((args) => {
     const name = args[0]!.split("/").pop()!
-    return { ...cmdInfo, name, args: [name, ...args.slice(1)] }
+    const { path: _written, ...rest } = cmdInfo
+    return { ...rest, name, args: [name, ...args.slice(1)], ...(args[0] !== name && { path: args[0] }) }
   })
 }
 

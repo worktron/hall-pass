@@ -5,7 +5,7 @@
  * through `evaluateBashCommand`. This replaces the scattered checks in
  * hook.ts with a single pipeline:
  *
- *   1. unwrapCommand()                     — nohup, nice, timeout
+ *   1. unwrapCommand()                     — nohup, nice, timeout, metamax's heavy-run.sh
  *   2. check env vars (DANGEROUS_ENV_VARS) — LD_PRELOAD etc.
  *   3. checkCommandFeedback(cmd, pipeline) — per-command feedback rules
  *   4. path check (only PATH_AWARE cmds)   — cat, rm, cp, mv, chmod...
@@ -21,7 +21,7 @@ import { lstatSync } from "fs"
 import type { CommandInfo } from "./parser.ts"
 import { expandTilde, type HallPassConfig } from "./config.ts"
 import { isInsideScratchDir, gitTracksFile } from "./repo.ts"
-import { SAFE_COMMANDS, DANGEROUS_COMMANDS, DB_CLIENTS, DANGEROUS_ENV_VARS, INJECTION_ENV_VARS } from "./safelist.ts"
+import { SAFE_COMMANDS, DANGEROUS_COMMANDS, DB_CLIENTS, DANGEROUS_ENV_VARS, INJECTION_ENV_VARS, PIPE_SHELLS } from "./safelist.ts"
 import { INSPECTORS } from "./inspectors.ts"
 import { unwrapCommand } from "./wrappers.ts"
 import { isPathAwareCommand, checkCommandPaths } from "./paths.ts"
@@ -135,7 +135,7 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
   // A path held in an unreadable variable only stops a command that would
   // otherwise go through; every other verdict already involves a review.
   if (unknownPath && (result.decision === "allow" || result.decision === "feedback")) {
-    const name = unwrapCommand(rawCmdInfo).name
+    const name = unwrapCommand(rawCmdInfo, ctx.scope).name
     return {
       decision: "prompt",
       reason: `path-unknown: ${name} ${unknownPath}`,
@@ -147,9 +147,18 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
 }
 
 function evaluateSteps(rawCmdInfo: CommandInfo, ctx: EvalContext, onUnknownPath: (arg: string) => void): EvalResult {
-  // 1. Unwrap transparent wrappers (nohup, nice, timeout)
-  const cmdInfo = unwrapCommand(rawCmdInfo)
+  // 1. Unwrap transparent wrappers (nohup, nice, timeout, metamax's heavy-run
+  //    script). First, so `bash scripts/heavy-run.sh <command>` is judged by
+  //    the command; repositoryScript refuses a heavy-run.sh left wrapped.
+  const cmdInfo = unwrapCommand(rawCmdInfo, ctx.scope)
   const { name } = cmdInfo
+
+  // 1b. A shell a wrapper hands piped input to (`curl … | heavy-run.sh bash`)
+  //     runs it as code: the same hard stop decide.ts gives `curl … | bash`,
+  //     which reads the pipe target's own name and so sees only the wrapper.
+  if (cmdInfo !== rawCmdInfo && cmdInfo.stdinFromPipe && PIPE_SHELLS.has(name)) {
+    return { decision: "prompt", reason: `pipe to ${name}`, message: `Piping into "${name}" executes arbitrary piped content as code`, hard: true }
+  }
 
   // 2. Check env var assignments for dangerous variables
   for (const assign of cmdInfo.assigns) {
@@ -299,6 +308,11 @@ function repositoryScript(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult | 
     break
   }
   if (!script) return null
+  // metamax's heavy-run script runs its arguments as a command. Recognized,
+  // it was unwrapped in step 1 and its command judged; one that reaches here
+  // was not recognized (METAMAX_HOME unknown, or the line may change it), so
+  // tracking says nothing about what it will run.
+  if (script.split("/").pop() === "heavy-run.sh") return null
   if (UNRESOLVABLE_PATH.test(script) || climbsOut(script)) return null
   if (script.startsWith("~") || script.startsWith(":")) return null   // not a plain path, or pathspec magic
   const places = isAbsolute(script) ? [ctx.cwd] : ctx.scope.places

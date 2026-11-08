@@ -62,6 +62,12 @@ export interface CommandInfo {
   name: string
   /** All arguments as strings, e.g., ["git", "push", "--force", "origin", "main"] */
   args: string[]
+  /**
+   * The first word as written, when it names the file by a folder
+   * (`./x.sh`, `$METAMAX_HOME/scripts/heavy-run.sh`); `name` and `args[0]`
+   * hold only its file name. Absent for a bare name.
+   */
+  path?: string
   /** Environment variable assignments on this command, e.g., [{ name: "LD_PRELOAD", value: "evil.so" }] */
   assigns: AssignInfo[]
   /**
@@ -160,6 +166,7 @@ export function extractCommandInfos(node: unknown, vars?: LiteralVars): CommandI
       commands.push({
         name,
         args: [name, ...args.slice(1)],
+        ...(args[0] !== name && { path: args[0] }),
         assigns: extractAssigns(n),
       })
     }
