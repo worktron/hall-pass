@@ -148,8 +148,8 @@ export function evaluateBashCommand(rawCmdInfo: CommandInfo, ctx: EvalContext): 
 
 function evaluateSteps(rawCmdInfo: CommandInfo, ctx: EvalContext, onUnknownPath: (arg: string) => void): EvalResult {
   // 1. Unwrap transparent wrappers (nohup, nice, timeout, metamax's heavy-run
-  //    script). First, so the repository-script rule below never allows
-  //    `bash scripts/heavy-run.sh <anything>` without judging the anything.
+  //    script). First, so `bash scripts/heavy-run.sh <command>` is judged by
+  //    the command; repositoryScript refuses a heavy-run.sh left wrapped.
   const cmdInfo = unwrapCommand(rawCmdInfo, ctx.scope)
   const { name } = cmdInfo
 
@@ -301,6 +301,11 @@ function repositoryScript(cmdInfo: CommandInfo, ctx: EvalContext): EvalResult | 
     break
   }
   if (!script) return null
+  // metamax's heavy-run script runs its arguments as a command. Recognized,
+  // it was unwrapped in step 1 and its command judged; one that reaches here
+  // was not recognized (METAMAX_HOME unknown, or the line may change it), so
+  // tracking says nothing about what it will run.
+  if (script.split("/").pop() === "heavy-run.sh") return null
   if (UNRESOLVABLE_PATH.test(script) || climbsOut(script)) return null
   if (script.startsWith("~") || script.startsWith(":")) return null   // not a plain path, or pathspec magic
   const places = isAbsolute(script) ? [ctx.cwd] : ctx.scope.places

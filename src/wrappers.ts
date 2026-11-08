@@ -9,7 +9,9 @@
 
 import type { CommandInfo } from "./parser.ts"
 import type { Scope } from "./places.ts"
-import { isTopOfSameRepository } from "./repo.ts"
+import { lstatSync } from "fs"
+import { resolve } from "path"
+import { isTopOfSameRepository, gitTracksFile } from "./repo.ts"
 
 /**
  * Given the args after the wrapper name, return the index where
@@ -82,7 +84,18 @@ function isMetamaxHeavyRun(word: string, scope: Scope): boolean {
   const written = word.replace(/^\$(METAMAX_HOME(?!\w)|\{METAMAX_HOME\})/, home)
   if (written === `${home}/scripts/heavy-run.sh`) return true
   if (word !== "scripts/heavy-run.sh" && word !== "./scripts/heavy-run.sh") return false
-  return scope.places !== null && scope.places.every((place) => isTopOfSameRepository(place, home))
+  // The checkout's own copy: the file its repository tracks, not a symlink
+  // or an untracked file put in its place.
+  return scope.places !== null && scope.places.every((place) =>
+    isTopOfSameRepository(place, home) && gitTracksFile(place, word) && isRegularFile(resolve(place, word)))
+}
+
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile()
+  } catch {
+    return false
+  }
 }
 
 /** Shells that run metamax's heavy-run script as a file: `bash "$METAMAX_HOME/scripts/heavy-run.sh" …`. */
@@ -95,7 +108,8 @@ const SCRIPT_SHELLS = new Set(["bash", "sh", "zsh"])
  * it does. It takes one flag, `--landing`; any other flag before the command
  * is one hall-pass does not know, and the line is judged as written. Run by a
  * shell, only the plain `bash <script> …` form counts, with no shell flags.
- * The inner command is named as the parser would name it typed bare.
+ * The inner command is named as the parser would name it typed bare, and
+ * keeps the standard input the line gives the script.
  */
 function heavyRunInner(cmdInfo: CommandInfo, scope: Scope): CommandInfo | null {
   const first = cmdInfo.path ?? cmdInfo.args[0]!
@@ -111,11 +125,15 @@ function heavyRunInner(cmdInfo: CommandInfo, scope: Scope): CommandInfo | null {
   if (rest.length === 0 || rest[0]!.startsWith("-")) return null
   const word = rest[0]!
   const name = word.split("/").pop()!
+  // Everything else about the command carries over: its assignments, and
+  // the standard input the script hands on (a heredoc, a pipe), which the
+  // interpreter and database rules read.
+  const { path: _script, ...carried } = cmdInfo
   return {
+    ...carried,
     name,
     args: [name, ...rest.slice(1)],
     ...(word !== name && { path: word }),
-    assigns: cmdInfo.assigns,
   }
 }
 
