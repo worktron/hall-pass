@@ -107,7 +107,8 @@ const SCRIPT_SHELLS = new Set(["bash", "sh", "zsh"])
  * and then runs its arguments, so it changes when the command runs, not what
  * it does. It takes one flag, `--landing`; any other flag before the command
  * is one hall-pass does not know, and the line is judged as written. Run by a
- * shell, only the plain `bash <script> …` form counts, with no shell flags.
+ * shell, only the plain `bash <script> …` form counts: the shell found on
+ * PATH (`./bash` could be anything), with no shell flags.
  * The inner command is named as the parser would name it typed bare, and
  * keeps the standard input the line gives the script.
  */
@@ -116,7 +117,7 @@ function heavyRunInner(cmdInfo: CommandInfo, scope: Scope): CommandInfo | null {
   let rest: string[]
   if (first.split("/").pop() === "heavy-run.sh" && isMetamaxHeavyRun(first, scope)) {
     rest = cmdInfo.args.slice(1)
-  } else if (SCRIPT_SHELLS.has(cmdInfo.name) && cmdInfo.args[1] !== undefined && isMetamaxHeavyRun(cmdInfo.args[1], scope)) {
+  } else if (SCRIPT_SHELLS.has(cmdInfo.name) && cmdInfo.path === undefined && cmdInfo.args[1] !== undefined && isMetamaxHeavyRun(cmdInfo.args[1], scope)) {
     rest = cmdInfo.args.slice(2)
   } else {
     return null

@@ -21,7 +21,7 @@ import { lstatSync } from "fs"
 import type { CommandInfo } from "./parser.ts"
 import { expandTilde, type HallPassConfig } from "./config.ts"
 import { isInsideScratchDir, gitTracksFile } from "./repo.ts"
-import { SAFE_COMMANDS, DANGEROUS_COMMANDS, DB_CLIENTS, DANGEROUS_ENV_VARS, INJECTION_ENV_VARS } from "./safelist.ts"
+import { SAFE_COMMANDS, DANGEROUS_COMMANDS, DB_CLIENTS, DANGEROUS_ENV_VARS, INJECTION_ENV_VARS, PIPE_SHELLS } from "./safelist.ts"
 import { INSPECTORS } from "./inspectors.ts"
 import { unwrapCommand } from "./wrappers.ts"
 import { isPathAwareCommand, checkCommandPaths } from "./paths.ts"
@@ -152,6 +152,13 @@ function evaluateSteps(rawCmdInfo: CommandInfo, ctx: EvalContext, onUnknownPath:
   //    the command; repositoryScript refuses a heavy-run.sh left wrapped.
   const cmdInfo = unwrapCommand(rawCmdInfo, ctx.scope)
   const { name } = cmdInfo
+
+  // 1b. A shell a wrapper hands piped input to (`curl … | heavy-run.sh bash`)
+  //     runs it as code: the same hard stop decide.ts gives `curl … | bash`,
+  //     which reads the pipe target's own name and so sees only the wrapper.
+  if (cmdInfo !== rawCmdInfo && cmdInfo.stdinFromPipe && PIPE_SHELLS.has(name)) {
+    return { decision: "prompt", reason: `pipe to ${name}`, message: `Piping into "${name}" executes arbitrary piped content as code`, hard: true }
+  }
 
   // 2. Check env var assignments for dangerous variables
   for (const assign of cmdInfo.assigns) {

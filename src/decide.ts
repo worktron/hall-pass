@@ -18,6 +18,7 @@ import type { AuditLogger } from "./audit.ts"
 import { checkFilePath } from "./paths.ts"
 import { checkFeedbackRules } from "./feedback.ts"
 import { createEvalContext, evaluateBashCommand, type EvalContext, type EvalResult } from "./evaluate.ts"
+import { PIPE_SHELLS } from "./safelist.ts"
 import { literalVariables } from "./vars.ts"
 import { rootScope, scopeOf } from "./places.ts"
 import { detectSecret } from "./secrets.ts"
@@ -271,7 +272,6 @@ export async function decide(
   }
 
   // Pipe target inspection — genuine `curl | bash`, NOT `&&`/`||` chains.
-  const PIPE_SHELLS = new Set(["sh", "bash", "zsh", "dash", "fish", "eval"])
   for (const name of extractPipeTargets(ast, known)) {
     if (PIPE_SHELLS.has(name)) {
       debug("pipe-target", { name })
