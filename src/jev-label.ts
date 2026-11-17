@@ -18,7 +18,7 @@
  * (HALL_PASS_JEV_DATA overrides), outside every checkout and owner-only, as
  * they return. A rerun pays only for commands with no answer from this model
  * and question set. The key is TYPESAFE_API_KEY, an op:// reference resolved
- * with `op read` (default op://Personal/TypeSafe API/credential); a raw key
+ * with `op read` (default op://agents/TypeSafe API/credential); a raw key
  * also works.
  */
 
@@ -77,7 +77,7 @@ function loadAnswers(): Map<string, Answer> {
 }
 
 async function resolveKey(): Promise<string> {
-  const raw = process.env.TYPESAFE_API_KEY ?? "op://Personal/TypeSafe API/credential"
+  const raw = process.env.TYPESAFE_API_KEY ?? "op://agents/TypeSafe API/credential"
   if (!raw.startsWith("op://")) return raw
   const p = Bun.spawnSync(["op", "read", raw])
   if (p.exitCode !== 0) throw new Error(`op read failed: ${p.stderr.toString().trim()}`)

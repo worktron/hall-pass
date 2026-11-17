@@ -29,7 +29,7 @@ describe("redaction", () => {
   })
 
   test("op:// references lose their vault and item", () => {
-    expect(redactUrl("op://Personal/TypeSafe API/credential")).toBe("op://…")
+    expect(redactUrl("op://agents/TypeSafe API/credential")).toBe("op://…")
     expect(redactText("op read op://Private/abc/password")).toBe("op read op://…")
   })
 
