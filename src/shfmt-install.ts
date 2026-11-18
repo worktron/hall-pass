@@ -8,7 +8,7 @@
  * Run directly: `bun src/shfmt-install.ts`.
  */
 
-import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs"
 import { resolve } from "node:path"
 
 export const SHFMT_VERSION = "v3.13.0"
@@ -42,6 +42,41 @@ async function download(url: string, dest: string): Promise<void> {
 
 export type EnsureResult = "already-pinned" | "installed"
 
+const PARTIAL = /^\.shfmt-(\d+)\.partial$/
+
+function isRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    // EPERM: the process exists but belongs to someone else.
+    return (err as NodeJS.ErrnoException).code === "EPERM"
+  }
+}
+
+/**
+ * Removes the half-downloaded files an install left in `binDir` when it was
+ * killed mid-download. A file whose process is still running is another
+ * install at work, and is left to it.
+ */
+export function clearLeftoverPartials(binDir: string, log: (line: string) => void = console.log): string[] {
+  let names: string[]
+  try {
+    names = readdirSync(binDir)
+  } catch {
+    return []
+  }
+  const removed: string[] = []
+  for (const name of names) {
+    const pid = Number(PARTIAL.exec(name)?.[1])
+    if (!pid || pid === process.pid || isRunning(pid)) continue
+    rmSync(resolve(binDir, name), { force: true })
+    removed.push(name)
+  }
+  if (removed.length) log(`Removed leftover partial downloads: ${removed.join(", ")}`)
+  return removed
+}
+
 /**
  * Makes `<binDir>/shfmt` the pinned version: leaves it when it already is,
  * else downloads the pinned release over it. Throws when the downloaded
@@ -60,6 +95,7 @@ export async function ensurePinnedShfmt(opts: {
   const dest = resolve(binDir, "shfmt")
   const want = version.replace(/^v/, "")
 
+  clearLeftoverPartials(binDir, log)
   const have = shfmtVersion(dest)
   if (have === want) {
     log(`shfmt ${version} already at ${dest}`)

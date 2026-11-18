@@ -118,6 +118,26 @@ describe("ensurePinnedShfmt", () => {
     })
   })
 
+  test("a partial download a killed install left is removed, one still being written is kept", async () => {
+    await withBinDir(async (binDir) => {
+      fakeShfmt(join(binDir, "shfmt"), "3.13.0")
+      const ended = Bun.spawnSync(["true"]).pid
+      const running = process.ppid
+      writeFileSync(join(binDir, `.shfmt-${ended}.partial`), "#!/bin/sh\nec")
+      writeFileSync(join(binDir, `.shfmt-${running}.partial`), "#!/bin/sh\nec")
+      const result = await ensurePinnedShfmt({ binDir, version: "v3.13.0", log: quiet, fetchTo: async () => {} })
+      expect(result).toBe("already-pinned")
+      expect(readdirSync(binDir).sort()).toEqual([`.shfmt-${running}.partial`, "shfmt"])
+    })
+  })
+
+  test("git ignores a partial download in bin/", () => {
+    const p = Bun.spawnSync(["git", "check-ignore", "-q", "--no-index", "bin/.shfmt-12345.partial"], {
+      cwd: join(import.meta.dir, ".."),
+    })
+    expect(p.exitCode).toBe(0)
+  })
+
   test("the new binary never appears at bin/shfmt until it is whole", async () => {
     await withBinDir(async (binDir) => {
       fakeShfmt(join(binDir, "shfmt"), "3.13.1")
