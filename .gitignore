@@ -38,4 +38,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Downloaded/compiled binaries
 bin/shfmt
+# A shfmt download in progress, or one a killed setup left (shfmt-install.ts)
+bin/.shfmt-*.partial
 bin/hall-pass
