@@ -121,7 +121,7 @@ describe("ensurePinnedShfmt", () => {
   test("a partial download a killed install left is removed, one still being written is kept", async () => {
     await withBinDir(async (binDir) => {
       fakeShfmt(join(binDir, "shfmt"), "3.13.0")
-      const ended = Bun.spawnSync(["true"]).pid
+      const ended = 99_999_999 // above every pid the system hands out, so never a running process
       const running = process.ppid
       writeFileSync(join(binDir, `.shfmt-${ended}.partial`), "#!/bin/sh\nec")
       writeFileSync(join(binDir, `.shfmt-${running}.partial`), "#!/bin/sh\nec")
