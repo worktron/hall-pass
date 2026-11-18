@@ -5,7 +5,7 @@
  *
  * Default (Claude Code) — sets up the hooks in the account's settings.json
  * ($CLAUDE_CONFIG_DIR/settings.json, or ~/.claude/settings.json):
- * 1. Checks that shfmt is installed
+ * 1. Installs the pinned shfmt into bin/ (shfmt-install.ts)
  * 2. Adds PreToolUse (decisions) + PostToolUse (outcome monitoring) hooks for
  *    Bash, Write, and Edit, and a Notification hook for permission_prompt
  *    (records when a native permission prompt is shown)
@@ -26,6 +26,7 @@
 import { resolve } from "path"
 import { homedir } from "os"
 import { hookCommand } from "./hook-command.ts"
+import { ensurePinnedShfmt } from "./shfmt-install.ts"
 
 const CODEX = process.argv.includes("--codex")
 
@@ -47,40 +48,15 @@ const HOOK_MATCHERS = ["Bash", "Write", "Edit"]
 /** One matcher group covers both Codex tools hall-pass judges (matcher is a regex). */
 const CODEX_MATCHER = "Bash|apply_patch"
 
-// -- Check / install shfmt --
+// -- Install the pinned shfmt --
+// hall-pass parses with the pinned version only (see shfmt-install.ts), so a
+// different shfmt on PATH is no substitute for it.
 
-const SHFMT_VERSION = "v3.13.0"
-
-async function installShfmt(): Promise<string> {
-  const platform = process.platform === "darwin" ? "darwin" : "linux"
-  const arch = process.arch === "arm64" ? "arm64" : "amd64"
-  const asset = `shfmt_${SHFMT_VERSION}_${platform}_${arch}`
-  const url = `https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/${asset}`
-
-  // Install alongside hall-pass source
-  const binDir = resolve(import.meta.dir, "..", "bin")
-  await Bun.spawn(["mkdir", "-p", binDir]).exited
-  const dest = resolve(binDir, "shfmt")
-
-  console.log(`Downloading shfmt ${SHFMT_VERSION}...`)
-  const resp = await fetch(url)
-  if (!resp.ok) {
-    console.error(`Failed to download shfmt: ${resp.status} ${resp.statusText}`)
-    console.error(`URL: ${url}`)
-    process.exit(1)
-  }
-
-  await Bun.write(dest, resp)
-  await Bun.spawn(["chmod", "+x", dest]).exited
-  console.log(`Installed shfmt to ${dest}`)
-  return dest
-}
-
-const shfmt = Bun.spawnSync(["which", "shfmt"])
-if (shfmt.exitCode !== 0) {
-  await installShfmt()
-} else {
-  console.log("shfmt found:", shfmt.stdout.toString().trim())
+try {
+  await ensurePinnedShfmt()
+} catch (err) {
+  console.error(err instanceof Error ? err.message : String(err))
+  process.exit(1)
 }
 
 // -- Read or create the settings file --

@@ -1,0 +1,6 @@
+{
+  "worktreeSetup": [
+    "bun install --frozen-lockfile",
+    "bun src/shfmt-install.ts"
+  ]
+}
