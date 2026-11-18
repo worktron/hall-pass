@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { findShfmt } from "./decide"
@@ -85,15 +85,55 @@ describe("ensurePinnedShfmt", () => {
     })
   })
 
-  test("fails when the download is not the pinned version", async () => {
+  test("a download of another version fails and leaves the old binary in place", async () => {
     await withBinDir(async (binDir) => {
+      fakeShfmt(join(binDir, "shfmt"), "3.13.1")
       const run = ensurePinnedShfmt({
         binDir,
         version: "v3.13.0",
         log: quiet,
         fetchTo: async (_url, dest) => fakeShfmt(dest, "3.12.0"),
       })
-      await expect(run).rejects.toThrow("reports 3.12.0 after install, not 3.13.0")
+      await expect(run).rejects.toThrow("downloaded shfmt reports 3.12.0, not 3.13.0")
+      expect(shfmtVersion(join(binDir, "shfmt"))).toBe("3.13.1")
+      expect(readdirSync(binDir)).toEqual(["shfmt"])
+    })
+  })
+
+  test("a download that breaks off leaves the old binary in place", async () => {
+    await withBinDir(async (binDir) => {
+      fakeShfmt(join(binDir, "shfmt"), "3.13.1")
+      const run = ensurePinnedShfmt({
+        binDir,
+        version: "v3.13.0",
+        log: quiet,
+        fetchTo: async (_url, dest) => {
+          writeFileSync(dest, "#!/bin/sh\nec")
+          throw new Error("connection reset")
+        },
+      })
+      await expect(run).rejects.toThrow("connection reset")
+      expect(shfmtVersion(join(binDir, "shfmt"))).toBe("3.13.1")
+      expect(readdirSync(binDir)).toEqual(["shfmt"])
+    })
+  })
+
+  test("the new binary never appears at bin/shfmt until it is whole", async () => {
+    await withBinDir(async (binDir) => {
+      fakeShfmt(join(binDir, "shfmt"), "3.13.1")
+      let seenDuringDownload: string | null = null
+      await ensurePinnedShfmt({
+        binDir,
+        version: "v3.13.0",
+        log: quiet,
+        fetchTo: async (_url, dest) => {
+          expect(dest).not.toBe(join(binDir, "shfmt"))
+          fakeShfmt(dest, "3.13.0")
+          seenDuringDownload = shfmtVersion(join(binDir, "shfmt"))
+        },
+      })
+      expect(seenDuringDownload).toBe("3.13.1")
+      expect(shfmtVersion(join(binDir, "shfmt"))).toBe("3.13.0")
     })
   })
 })

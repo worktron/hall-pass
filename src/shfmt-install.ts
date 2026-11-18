@@ -8,7 +8,7 @@
  * Run directly: `bun src/shfmt-install.ts`.
  */
 
-import { existsSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs"
 import { resolve } from "node:path"
 
 export const SHFMT_VERSION = "v3.13.0"
@@ -67,12 +67,20 @@ export async function ensurePinnedShfmt(opts: {
   }
 
   log(have ? `shfmt at ${dest} is ${have}, replacing it with ${version}` : `Downloading shfmt ${version}...`)
-  await Bun.spawn(["mkdir", "-p", binDir]).exited
-  await fetchTo(shfmtReleaseUrl(version), dest)
-  await Bun.spawn(["chmod", "+x", dest]).exited
-
-  const got = shfmtVersion(dest)
-  if (got !== want) throw new Error(`shfmt at ${dest} reports ${got ?? "nothing"} after install, not ${want}`)
+  mkdirSync(binDir, { recursive: true })
+  // Every hook runs bin/shfmt, so the new binary is written beside it, checked,
+  // and renamed over it: no hook sees a partial file, and a failed download
+  // leaves the old binary in place.
+  const partial = resolve(binDir, `.shfmt-${process.pid}.partial`)
+  try {
+    await fetchTo(shfmtReleaseUrl(version), partial)
+    chmodSync(partial, 0o755)
+    const got = shfmtVersion(partial)
+    if (got !== want) throw new Error(`downloaded shfmt reports ${got ?? "nothing"}, not ${want}; ${dest} left as it was`)
+    renameSync(partial, dest)
+  } finally {
+    rmSync(partial, { force: true })
+  }
   log(`Installed shfmt ${version} to ${dest}`)
   return "installed"
 }
