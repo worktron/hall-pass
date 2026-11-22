@@ -141,7 +141,7 @@ describe("ensurePinnedShfmt", () => {
   test("the new binary never appears at bin/shfmt until it is whole", async () => {
     await withBinDir(async (binDir) => {
       fakeShfmt(join(binDir, "shfmt"), "3.13.1")
-      let seenDuringDownload: string | null = null
+      const seenDuringDownload: (string | null)[] = []
       await ensurePinnedShfmt({
         binDir,
         version: "v3.13.0",
@@ -149,10 +149,10 @@ describe("ensurePinnedShfmt", () => {
         fetchTo: async (_url, dest) => {
           expect(dest).not.toBe(join(binDir, "shfmt"))
           fakeShfmt(dest, "3.13.0")
-          seenDuringDownload = shfmtVersion(join(binDir, "shfmt"))
+          seenDuringDownload.push(shfmtVersion(join(binDir, "shfmt")))
         },
       })
-      expect(seenDuringDownload).toBe("3.13.1")
+      expect(seenDuringDownload).toEqual(["3.13.1"])
       expect(shfmtVersion(join(binDir, "shfmt"))).toBe("3.13.0")
     })
   })

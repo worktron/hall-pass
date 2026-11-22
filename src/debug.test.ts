@@ -9,6 +9,9 @@ function makeConfig(debugEnabled: boolean): HallPassConfig {
     paths: { protected: [], read_only: [], no_delete: [] },
     audit: { enabled: false, path: "/tmp/audit.jsonl" },
     debug: { enabled: debugEnabled },
+    classifier: { defer: true },
+    codex: { deny_hard_stops: true },
+    op: { readable_references: [], readable_vaults: [] },
   }
 }
 

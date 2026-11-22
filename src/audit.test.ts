@@ -13,6 +13,9 @@ function makeConfig(enabled: boolean, path: string): HallPassConfig {
     paths: { protected: [], read_only: [], no_delete: [] },
     audit: { enabled, path },
     debug: { enabled: false },
+    classifier: { defer: true },
+    codex: { deny_hard_stops: true },
+    op: { readable_references: [], readable_vaults: [] },
   }
 }
 

@@ -18,6 +18,9 @@ function makeConfig(overrides: Partial<HallPassConfig["paths"]> = {}): HallPassC
     },
     audit: { enabled: false, path: "/tmp/audit.jsonl" },
     debug: { enabled: false },
+    classifier: { defer: true },
+    codex: { deny_hard_stops: true },
+    op: { readable_references: [], readable_vaults: [] },
   }
 }
 

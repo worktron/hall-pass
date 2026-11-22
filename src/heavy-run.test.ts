@@ -2,7 +2,7 @@ import { afterAll, describe, test, expect } from "bun:test"
 import { resolve } from "path"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
-import { decide, type HookDecision } from "./decide.ts"
+import { decide, reasonOf, type HookDecision } from "./decide.ts"
 import { loadConfig, type HallPassConfig } from "./config.ts"
 import { unwrapCommand } from "./wrappers.ts"
 import { rootScope } from "./places.ts"
@@ -72,7 +72,7 @@ async function run(command: string, where: Where = {}): Promise<HookDecision> {
 
 /** The parts of a decision a user would notice. */
 function verdict(d: HookDecision): unknown {
-  return { decision: d.decision, reason: d.reason, hard: "hard" in d ? d.hard : undefined }
+  return { decision: d.decision, reason: reasonOf(d), hard: "hard" in d ? d.hard : undefined }
 }
 
 /** Every way the brief says metamax's script is written, with the command it wraps. */
