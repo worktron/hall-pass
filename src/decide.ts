@@ -334,7 +334,8 @@ export async function decide(
   let granted: string | null = null      // first allow a config setting gave (EvalResult.grant)
   for (const cmdInfo of commandInfos) {
     const result = evaluateWithValues(cmdInfo, values, ctx, strictCtx)
-    debug("eval", { name: cmdInfo.name, decision: result.decision })
+    // The reason names the command a wrapper hid (`timeout foo` is "unknown: foo"); weekly.ts reads it from a replay.
+    debug("eval", { name: cmdInfo.name, decision: result.decision, reason: "reason" in result ? result.reason : undefined })
 
     if (result.decision === "feedback") {
       if (!suggestion) { suggestion = result.suggestion; suggestionLayer = "evaluate" }

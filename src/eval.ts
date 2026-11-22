@@ -27,6 +27,7 @@
 import { loadConfig } from "./config.ts"
 import { decide, findShfmt, DEFER_MODES } from "./decide.ts"
 import { readAuditLog, type AuditEntry } from "./audit.ts"
+import type { DebugFn } from "./debug.ts"
 
 /** Recorded decision names; replayed "ask" is normalized to "prompt". */
 type DecisionName = "allow" | "prompt" | "feedback" | "pass" | "block"
@@ -163,11 +164,15 @@ export async function runEval(entries: AuditEntry[], replay: ReplayFn): Promise<
   return report
 }
 
-/** Replay through the working-tree decide() with the current config. */
-export async function makeDecideReplay(): Promise<ReplayFn> {
+/**
+ * Replay through the working-tree decide() with the current config. `debug`
+ * sees decide()'s debug calls, so a caller can read what it judged on the way
+ * (weekly.ts collects the unknown commands on a line).
+ */
+export async function makeDecideReplay(options: { debug?: DebugFn } = {}): Promise<ReplayFn> {
   const config = await loadConfig()
   const shfmtBin = findShfmt()
-  const deps = { config, shfmtBin, debug: () => {}, audit: { log() {}, event() {} }, metamaxHome: process.env.METAMAX_HOME }
+  const deps = { config, shfmtBin, debug: options.debug ?? (() => {}), audit: { log() {}, event() {} }, metamaxHome: process.env.METAMAX_HOME }
 
   return async (tool, input, mode) => {
     let toolInput: Record<string, unknown>

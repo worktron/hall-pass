@@ -10,17 +10,48 @@
  *   - which prompt reasons are ~always approved? (safelist gap candidates)
  *   - how often do abstains (pass) end in a native permission prompt?
  *
+ * `--weekly` prints this week against last week instead (weekly.ts).
+ *
  * Caveat: "not run" conflates user-denied with interrupted/session-ended —
  * Claude Code has no hook that reports the user's actual choice.
  */
 
 import { loadConfig } from "./config.ts"
 import { readAuditLog, type AuditEntry } from "./audit.ts"
+import { formatWeekly, makeUnknownReplay, weeklyReport } from "./weekly.ts"
 
 const GAP_MIN_SAMPLES = 3
 
+const USAGE = `usage: bun run stats [--weekly [--until <ISO time>]] [audit log path]`
+
+// --weekly: this week against last week (weekly.ts). --until pins the
+// week's end, to reproduce a past check-in; it defaults to now.
+let weekly = false
+let until: number | undefined
+let pathArg: string | undefined
+const args = process.argv.slice(2)
+for (let i = 0; i < args.length; i++) {
+  const arg = args[i]!
+  if (arg === "--weekly") weekly = true
+  else if (arg === "--until") {
+    const value = args[++i]
+    until = value === undefined ? NaN : Date.parse(value)
+    if (Number.isNaN(until)) {
+      console.error(`--until needs a time such as 2026-11-23T09:00:00, got ${value ?? "nothing"}`)
+      process.exit(2)
+    }
+  } else if (arg.startsWith("--") || pathArg !== undefined) {
+    console.error(USAGE)
+    process.exit(2)
+  } else pathArg = arg
+}
+if (until !== undefined && !weekly) {
+  console.error(`--until only applies with --weekly\n${USAGE}`)
+  process.exit(2)
+}
+
 const config = await loadConfig()
-const path = process.argv[2] ?? config.audit.path
+const path = pathArg ?? config.audit.path
 
 // Includes rotated archives (<path>.<timestamp>) — the full corpus.
 const entries = readAuditLog(path)
@@ -28,6 +59,12 @@ if (entries.length === 0) {
   console.error(`No audit log at ${path}`)
   console.error(`Audit logging writes it as you work (audit.enabled in config).`)
   process.exit(1)
+}
+
+if (weekly) {
+  const report = await weeklyReport(entries, { until: until ?? Date.now(), path, replay: await makeUnknownReplay() })
+  console.log(formatWeekly(report))
+  process.exit(0)
 }
 
 // Older entries (pre-outcome-monitoring) lack an event field: treat as decisions.
