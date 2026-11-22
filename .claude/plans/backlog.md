@@ -47,3 +47,11 @@ Done when: tests show `curl … | timeout 30 python3 -`, `curl … | nohup pytho
 Do not touch: the heavy-run wrapper's rules; which wrappers are transparent.
 Needs: nothing.
 Touches: src/wrappers.ts, src/wrappers.test.ts, src/hook.test.ts.
+
+## record-unknown-command-names · The audit log records which commands were unknown, so the weekly view stops replaying
+Written by: hall-pass/stats-weekly-view
+Goal: an idea, not a fault. A decision that abstains on "unknown commands in pipeline" is logged without the commands that made it, so `bun run stats --weekly` (src/weekly.ts) names them by replaying each such line through today's `decide()`: about a minute for two busy weeks (about 4,000 distinct lines), judged with today's rules and the current folder rather than the ones in force then. Record the names on the decision entry instead (for example an `unknown` list, filled from the per-command `unknown: <name>` reasons decide.ts already computes), and have the weekly view read them, keeping the replay only for entries written before the field existed. This changes what every hook call writes, so it needs a plan: the field's name, a cap for long pipelines, and how stats and eval read entries with and without it.
+Done when: a new "unknown commands in pipeline" entry carries its unknown command names, `stats --weekly` names them from the log without replaying such entries, and a test covers entries with and without the field.
+Do not touch: the existing audit log files (read only); the default `bun run stats` report.
+Needs: nothing.
+Touches: src/decide.ts, src/audit.ts, src/weekly.ts, their tests.
