@@ -69,6 +69,12 @@ describe("typecheck", () => {
     expect(pkg.scripts.typecheck).toBe("tsc --noEmit")
   })
 
+  test("the whole project compiles with no type errors", async () => {
+    const p = Bun.spawn([join(root, "node_modules", ".bin", "tsc"), "--noEmit", "--pretty", "false", "-p", root], { stdout: "pipe", stderr: "pipe" })
+    const out = await new Response(p.stdout).text()
+    expect({ code: await p.exited, out }).toEqual({ code: 0, out: "" })
+  })
+
   test("with the project's settings, the compiler reads Bun's types and refuses a type error", async () => {
     const dir = mkdtempSync(join(tmpdir(), "hall-pass-typecheck-"))
     try {

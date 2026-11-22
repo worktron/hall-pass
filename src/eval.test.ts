@@ -162,6 +162,13 @@ describe("makeDecideReplay (integration with real decide)", () => {
     expect(dangerous?.decision).toBe("prompt")
   })
 
+  test("a replayed nudge gives its suggestion as the reason, as the audit log records it", async () => {
+    const replay = await makeDecideReplay()
+    const nudged = await replay("Bash", `curl -s https://api.example.com | python3 -c "import json, sys; print(json.loads(sys.stdin.read())['key'])"`)
+    expect(nudged?.decision).toBe("feedback")
+    expect(nudged?.reason).toContain("jq")
+  })
+
   test("returns null for tools it cannot replay", async () => {
     const replay = await makeDecideReplay()
     expect(await replay("Glob", "**/*.ts")).toBeNull()
