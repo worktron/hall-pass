@@ -282,7 +282,7 @@ describe("a shell judged by the repository script it runs", () => {
     expect(await judgeLine("bash scripts/ship-gates.sh", repo)).toEqual({ decision: "allow", reason: "all commands safe" })
   })
 
-  const scriptPrompt = (shell: string) => ({ decision: "prompt", reason: `${shell}: script execution`, message: `Running "${shell}" with a script file` })
+  const scriptPrompt = (shell: string): EvalResult => ({ decision: "prompt", reason: `${shell}: script execution`, message: `Running "${shell}" with a script file` })
 
   test("bash /tmp/x.sh → prompt (outside the repository)", () => {
     expect(judge(cmd("bash", "/tmp/x.sh"), repo)).toEqual(scriptPrompt("bash"))

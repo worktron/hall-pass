@@ -27,7 +27,7 @@
 import { loadConfig } from "./config.ts"
 import { createDebug } from "./debug.ts"
 import { createAudit, type AuditContext, type AuditLogger } from "./audit.ts"
-import { decide, findShfmt } from "./decide.ts"
+import { decide, findShfmt, reasonOf } from "./decide.ts"
 import { codexOutput, CODEX_TOOLS, type CodexEvent } from "./codex.ts"
 import { createDiag } from "./diag.ts"
 
@@ -95,11 +95,11 @@ const decision = await decide(toolName, toolInput, {
 const output = codexOutput(event, decision, config)
 
 if (event === "PermissionRequest" && output === null) {
-  audit.event("native-prompt", { message: `codex ${toolName}: ${decision.reason}` })
+  audit.event("native-prompt", { message: `codex ${toolName}: ${reasonOf(decision)}` })
 }
 
 const summary = output === null ? "NO-OUTPUT" : JSON.stringify(output).slice(0, 160)
-diag(`${event} ${decision.decision.toUpperCase()} ${decision.reason} -> ${summary}`)
+diag(`${event} ${decision.decision.toUpperCase()} ${reasonOf(decision)} -> ${summary}`)
 
 if (output !== null) process.stdout.write(JSON.stringify(output))
 process.exit(0)

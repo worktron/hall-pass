@@ -25,7 +25,7 @@
     "stats": "bun src/stats.ts",
     "eval": "bun src/eval.ts",
     "jev": "bun src/jev-label.ts",
-    "typecheck": "bun build src/hook.ts --no-bundle --no-emit && bun build src/codex-hook.ts --no-bundle --no-emit"
+    "typecheck": "tsc --noEmit"
   },
   "repository": {
     "type": "git",
@@ -46,7 +46,8 @@
     "bun": ">=1.0.0"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "^7"
   },
   "dependencies": {
     "pgsql-ast-parser": "^12.0.2",

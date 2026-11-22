@@ -26,6 +26,9 @@
     // Some stricter flags (disabled by default)
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
+    "noPropertyAccessFromIndexSignature": false,
+
+    // TypeScript 7 loads no @types packages unless they are named.
+    "types": ["bun"]
   }
 }

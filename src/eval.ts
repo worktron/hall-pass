@@ -25,7 +25,7 @@
  */
 
 import { loadConfig } from "./config.ts"
-import { decide, findShfmt, DEFER_MODES } from "./decide.ts"
+import { decide, findShfmt, reasonOf, DEFER_MODES } from "./decide.ts"
 import { readAuditLog, type AuditEntry } from "./audit.ts"
 import type { DebugFn } from "./debug.ts"
 
@@ -186,7 +186,7 @@ export async function makeDecideReplay(options: { debug?: DebugFn } = {}): Promi
       return null
     }
     const d = await decide(tool, toolInput, { ...deps, mode })
-    return { decision: d.decision === "ask" ? "prompt" : d.decision, reason: d.reason ?? "" }
+    return { decision: d.decision === "ask" ? "prompt" : d.decision, reason: reasonOf(d) }
   }
 }
 

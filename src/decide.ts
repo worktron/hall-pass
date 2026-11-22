@@ -39,6 +39,11 @@ export type HookDecision =
   | { decision: "ask"; reason: string; message: string; hard?: boolean }
   | { decision: "pass"; reason: string }
 
+/** The reason a decision gives. A nudge's is its suggestion, which is what the audit log records for it. */
+export function reasonOf(d: HookDecision): string {
+  return d.decision === "feedback" ? d.suggestion : d.reason
+}
+
 const allow = (reason: string): HookDecision => ({ decision: "allow", reason })
 const feedback = (suggestion: string): HookDecision => ({ decision: "feedback", suggestion })
 const prompt = (reason: string, message: string): HookDecision => ({ decision: "ask", reason, message })
