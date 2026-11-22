@@ -84,7 +84,7 @@ export function readAuditLog(path: string): AuditEntry[] {
 }
 
 /** Rotated archives beside the live log, oldest first. */
-function auditArchives(path: string): string[] {
+export function auditArchives(path: string): string[] {
   const base = basename(path)
   try {
     return readdirSync(dirname(path))

@@ -83,10 +83,13 @@ Two observe-only hooks close the loop: a PostToolUse hook records when a tool ca
 
 ```bash
 bun run stats   # decision mix, approval rate per prompt reason, safelist gap candidates
+bun run stats --weekly   # the last 7 days against the 7 before; --until <time> pins the end
 bun run eval    # replay recorded traffic through the current decide() and diff
 ```
 
 `eval` turns the audit log into a labeled regression corpus for policy changes: edit the safelist/inspectors (or point `HALL_PASS_CONFIG` at a candidate config), replay every recorded decision, and see exactly which real prompts disappear (wins), which allows start prompting (regressions), and — the failure condition — whether any prompt the user did NOT approve would now auto-allow (exit 1). On an unchanged working tree the diff is empty.
+
+`stats --weekly` is the view for a weekly check-in: calls judged, the decision mix, hall-pass and native prompts per 1,000 calls, the top prompt and pass reasons with how many went on to run, and the audit log's size, each beside the week before. The log records only "unknown commands in pipeline", not which command was unknown, so those lines are replayed through today's `decide()` to name the commands (about a minute for two busy weeks); a line today's rules now handle counts as "now decided".
 
 A prompt reason that is always approved is a safelist gap; one that is frequently declined is earning its keep. ("Not run" conflates user-denied with interrupted — Claude Code has no hook that reports the user's actual choice.)
 
@@ -359,6 +362,7 @@ src/
   debug.ts       Debug logging to stderr
   audit.ts       Audit logging to JSON Lines file
   stats.ts       Audit log report (bun run stats)
+  weekly.ts      This week against last week (bun run stats --weekly)
   eval.ts        Replay the audit log through decide() (bun run eval)
   jev.ts         Offline command kinds with Jev; jev-label.ts is bun run jev
   cli.ts         The hall-pass command: decision, codex-hook; bare prints the usage
