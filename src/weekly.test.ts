@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, statSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { join, resolve } from "path"
 import type { AuditEntry } from "./audit.ts"
-import { completedIds, diskUse, makeUnknownReplay, unknownNames, weekOf, WEEK_MS, type Replayed } from "./weekly.ts"
+import { comparedKeys, completedIds, diskUse, makeUnknownReplay, unknownNames, weekOf, WEEK_MS, type Replayed } from "./weekly.ts"
 
 const STATS = resolve(import.meta.dir, "stats.ts")
 const DAY = 86_400_000
@@ -202,6 +202,14 @@ describe("unknownNames", () => {
   })
 })
 
+describe("comparedKeys", () => {
+  test("lists this week's top, then last week's top that fell away, and counts the rest", () => {
+    const now = new Map([["a", 9], ["b", 5], ["c", 1]])
+    const before = new Map([["gone", 20], ["a", 3], ["c", 8], ["tail", 1]])
+    expect(comparedKeys(now, before, 2)).toEqual({ keys: ["a", "b", "gone", "c"], more: 1 })
+  })
+})
+
 describe("diskUse", () => {
   test("adds up the live log and its archives", () => {
     const use = diskUse(logPath)
@@ -234,6 +242,7 @@ describe("stats --weekly", () => {
         this week  per 1,000  ran  last week  per 1,000  reason
                 2      105.3    2          0          0  op: item get
                 1       52.6    0          0          0  secret: Anthropic API key
+                0          0    0          1       90.9  op: read
 
       Top pass reasons (hall-pass abstained; "deferred" ones went to the auto-mode classifier):
         this week  per 1,000  ran  last week  per 1,000  reason

@@ -217,17 +217,32 @@ function table(rows: string[][], rightAligned: number): string[] {
   )
 }
 
+/**
+ * Which keys a comparison table shows: this week's top `n`, then any of last
+ * week's top `n` not already listed, so a reason or command that fell away
+ * (to zero, or below this week's cut) still shows its drop.
+ */
+export function comparedKeys(now: Map<string, number>, before: Map<string, number>, n: number): { keys: string[]; more: number } {
+  const ranked = (m: Map<string, number>) =>
+    [...m.entries()].filter(([, c]) => c > 0).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, n).map(([k]) => k)
+  const keys = [...new Set([...ranked(now), ...ranked(before)])]
+  const all = new Set([...now.keys(), ...before.keys()])
+  return { keys, more: all.size - keys.length }
+}
+
+const totals = (m: Map<string, ReasonCount>) => new Map([...m].map(([k, s]) => [k, s.total]))
+
 function reasonRows(title: string, thisWeek: Week, lastWeek: Week, pick: (w: Week) => Map<string, ReasonCount>): string[] {
   const now = pick(thisWeek)
   const before = pick(lastWeek)
-  const top = [...now.entries()].sort((a, b) => b[1].total - a[1].total || a[0].localeCompare(b[0])).slice(0, TOP_REASONS)
-  if (top.length === 0) return [`\n${title}: none this week.`]
+  const { keys, more } = comparedKeys(totals(now), totals(before), TOP_REASONS)
+  if (keys.length === 0) return [`\n${title}: none in either week.`]
   const rows = [["this week", "per 1,000", "ran", "last week", "per 1,000", "reason"]]
-  for (const [reason, s] of top) {
+  for (const reason of keys) {
+    const s = now.get(reason) ?? { total: 0, ran: 0 }
     const last = before.get(reason)?.total ?? 0
     rows.push([int(s.total), perThousand(s.total, thisWeek.decisions), int(s.ran), int(last), perThousand(last, lastWeek.decisions), reason])
   }
-  const more = now.size - top.length
   return [`\n${title}:`, ...table(rows, 5), ...(more > 0 ? [`  and ${more} more reasons`] : [])]
 }
 
@@ -257,11 +272,10 @@ export function formatWeekly(r: WeeklyReport): string {
   const u = r.unknownThis
   const v = r.unknownLast
   out.push(`\nUnknown commands behind "${UNKNOWN_PIPELINE}" (lines replayed through today's rules):`)
-  const names = [...u.names.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, TOP_UNKNOWN)
+  const { keys: names, more } = comparedKeys(u.names, v.names, TOP_UNKNOWN)
   if (names.length > 0) {
-    const nameRows = [["this week", "last week", "command"], ...names.map(([name, n]) => [int(n), int(v.names.get(name) ?? 0), name])]
+    const nameRows = [["this week", "last week", "command"], ...names.map((name) => [int(u.names.get(name) ?? 0), int(v.names.get(name) ?? 0), name])]
     out.push(...table(nameRows, 2))
-    const more = u.names.size - names.length
     if (more > 0) out.push(`  and ${more} more commands`)
   }
   const summary = (label: string, x: UnknownNames) =>
