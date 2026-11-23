@@ -63,3 +63,11 @@ Done when: tests show a push to main after `cd <scratchpad>/r`, and after `S=<sc
 Do not touch: the hard stop for pushes to GitHub remotes; the list of protected branches.
 Needs: nothing.
 Touches: src/git.ts, src/evaluate.ts (how a cd reaches git's repository folder), src/git.test.ts, src/hook.test.ts.
+
+## stand-in-keys-pass · A key that says it is fake does not prompt
+Written by: hall-pass/hall-pass-weekly-checkin
+Goal: a fault. The secret check (src/secrets.ts, the `sk-ant-` pattern) prompts on `sk-ant-api03-not-a-real-key`, the stand-in key metamax's live tests write into settings files. In the week of 16 to 23 Nov that was 12 prompts on Writes, Edits and heredocs of metamax `server/live/*-real.test.ts` files, and all 12 were approved. Skip a match whose own text marks it as a stand-in (`not-a-real`, `fake`, `example`, `placeholder`, `dummy`, a run of `x` or `0`), for every key type, not only Anthropic's. The marker must be inside the matched key, never elsewhere on the line, so a real key next to the word "example" still prompts.
+Done when: tests show `sk-ant-api03-not-a-real-key` and a `ghp_` key with a fake-marked body pass the secret check in a Write, an Edit and a Bash heredoc, while a random 40-character `sk-ant-api03-` key, also on a line containing the word "example", still prompts.
+Do not touch: the key patterns themselves; audit-log redaction (ticket audit-log-redact).
+Needs: nothing.
+Touches: src/secrets.ts, src/secrets.test.ts.
