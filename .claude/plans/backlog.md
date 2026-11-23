@@ -55,3 +55,11 @@ Done when: a new "unknown commands in pipeline" entry carries its unknown comman
 Do not touch: the existing audit log files (read only); the default `bun run stats` report.
 Needs: nothing.
 Touches: src/decide.ts, src/audit.ts, src/weekly.ts, their tests.
+
+## push-after-cd-into-scratch · A push to main inside a throwaway repo reached by `cd` is not a hard stop
+Written by: hall-pass/hall-pass-weekly-checkin
+Goal: a fault. A line that does `cd <scratchpad folder>` and then pushes `main` of a repository there is a hard stop today, even when the folder really is a scratchpad (checked with today's rules on main c9faab2, 2026-11-23). The protected-push rule already lets a throwaway repository through (`pushStaysLocal` in src/git.ts, which calls `isScratchDir` from src/repo.ts), but it judges the folder the hook was called from (hook `cwd`, adjusted only by `git -C`), so a `cd` earlier in the same line is never seen. In the week of 16 to 23 Nov, 6 of the 10 push prompts were agents testing landing scripts against bare repos under their scratchpad or `mktemp -d`, and none ran: the prompt stopped the test work. Follow a `cd` to a literal or proven-variable path earlier in the line when choosing the repository folder for git. A `cd` to a path nobody can read (`cd $T` after `T=$(mktemp -d)`) keeps the hard stop unless the evaluator already proves it is a temp folder. Check why `cd` was not followed before (the cd holes closed in PRs #42 to #46) and keep those closed.
+Done when: tests show a push to main after `cd <scratchpad>/r`, and after `S=<scratchpad>; cd $S/r`, is allowed; the same push after `cd ~/Workspace/x` stays a hard stop; and a first push of main after `gh repo create` in a real checkout stays a hard stop. A replay of the 16 to 23 Nov audit files shows which recorded decisions change.
+Do not touch: the hard stop for pushes to GitHub remotes; the list of protected branches.
+Needs: nothing.
+Touches: src/git.ts, src/evaluate.ts (how a cd reaches git's repository folder), src/git.test.ts, src/hook.test.ts.
