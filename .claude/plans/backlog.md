@@ -95,3 +95,11 @@ Done when: tests cover each command's read-only forms (allowed) and a writing fo
 Do not touch: `$(...)` as a command name (it stays unknown); how `xcrun` resolves other tools.
 Needs: nothing.
 Touches: src/safelist.ts, src/inspectors.ts, their tests.
+
+## audit-log-retention · Old audit log archives are deleted, so the log stops growing without bound
+Written by: hall-pass/hall-pass-weekly-checkin
+Goal: hall-pass's audit log stops filling the disk. Archives rotated at 5 MB are never deleted (src/audit.ts, the comment above AUDIT_MAX_BYTES), so on 2026-11-23 `~/.config/hall-pass` held 405 MB in 82 files going back to 2026-09-12. The week of 16 to 23 Nov added 96.7 MB and the week before 41.5 MB. Delete rotated archives older than a set age at rotation time (60 days by default, a config key to change it), never the live file. The weekly view needs 14 days, and `bun run eval` and the audit replay technique want a few weeks. Shorter retention also shortens how long a key typed into a command sits in the log (ticket audit-log-redact).
+Done when: a test rotates the log with archives older and newer than the limit and only the older ones are gone; `bun run stats --weekly` still reports both weeks; the first deletion on the live log happens only after the owner says yes to it.
+Do not touch: the live audit.jsonl; the entry format.
+Needs: the owner's yes before the first real deletion.
+Touches: src/audit.ts, src/config.ts, their tests.
