@@ -87,3 +87,11 @@ Done when: tests show `for c in "item get" read; do op $c --help; done` and `op 
 Do not touch: what op commands that read secrets decide.
 Needs: nothing.
 Touches: src/inspectors.ts (op), src/inspectors.test.ts.
+
+## known-dev-and-simulator-commands · exit, man, col and read-only simulator, dev, tmux and PlistBuddy commands are recognized
+Written by: hall-pass/hall-pass-weekly-checkin
+Goal: fewer passes to the auto-mode classifier. In the week of 16 to 23 Nov, "unknown commands in pipeline" was 3,005 passes, and replaying them through main c9faab2 left 2,995 still unknown. The commands behind them: `simctl` 763 (as `xcrun simctl`), `axe` 479, `dev` 254, `exit` 119, `tmux` 85, `devicectl` 56, `man` 35, `col` 33, `PlistBuddy` 33. `exit`, `man` and `col` are plainly safe (a shell builtin and two readers). For the rest, allow the subcommands that only read: `xcrun simctl list`/`get_app_container`/`io … screenshot`, `xcrun devicectl list`, `dev status`/`logs`/`ps`, `tmux capture-pane`/`list-*`/`display-message`, `PlistBuddy -c Print`. Leave writing subcommands (`simctl erase`, `dev restart`, `tmux kill-*`, `PlistBuddy -c Set`) unknown. Decide `axe` (drives taps on the iOS Simulator only) in the plan. Run `bun run stats --weekly` before and after and say how many lines each addition decides.
+Done when: tests cover each command's read-only forms (allowed) and a writing form (still a pass), and a replay of the 16 to 23 Nov audit files shows the unknown count for these names falling.
+Do not touch: `$(...)` as a command name (it stays unknown); how `xcrun` resolves other tools.
+Needs: nothing.
+Touches: src/safelist.ts, src/inspectors.ts, their tests.
