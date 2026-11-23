@@ -79,3 +79,11 @@ Done when: tests show `echo | bash ./script.sh` gets the same decision as `bash 
 Do not touch: the wrapper handling in ticket wrappers-keep-piped-input.
 Needs: nothing.
 Touches: src/evaluate.ts (the pipe to shell step), src/inspectors.ts (runsStdinProgram if it decides), their tests.
+
+## op-help-is-safe · Any `op … --help` is allowed, even when the command word is a variable
+Written by: hall-pass/hall-pass-weekly-checkin
+Goal: `op item get --help` is allowed today, but `for c in "item edit" read; do op $c --help; done` prompts as "op: $c" because the command word is a loop variable. In the week of 16 to 23 Nov that was 9 prompts, all approved, from an agent reading 1Password's flags. `--help` (and `-h`) makes op print usage and read no secret, whatever the command, so the op inspector (src/inspectors.ts) can allow any op line carrying it before it tries to read the command word.
+Done when: tests show `for c in "item get" read; do op $c --help; done` and `op $c -h` are allowed, and `op $c` and `op $c --vault x` without help still prompt.
+Do not touch: what op commands that read secrets decide.
+Needs: nothing.
+Touches: src/inspectors.ts (op), src/inspectors.test.ts.
